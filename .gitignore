@@ -1,0 +1,7 @@
+node_modules/
+
+# Rollup/babel cache the AsyncAPI Generator's React renderer writes at the template package root
+__transpiled/
+
+# Scratch output from local `npm run generate:example` / manual template runs
+/tmp-generated/

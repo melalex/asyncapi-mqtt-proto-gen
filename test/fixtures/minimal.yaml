@@ -1,0 +1,33 @@
+asyncapi: '3.1.0'
+
+info:
+  title: Minimal Fixture
+  version: '1.0.0'
+
+servers:
+  production:
+    host: 'localhost:1883'
+    protocol: mqtt
+
+defaultContentType: application/json
+
+channels:
+  ping:
+    address: 'ping'
+    messages:
+      Ping:
+        $ref: '#/components/messages/Ping'
+
+components:
+  messages:
+    Ping:
+      name: Ping
+      contentType: application/json
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package fixture.minimal;
+          message Ping {
+            int32 sequence = 1;
+          }

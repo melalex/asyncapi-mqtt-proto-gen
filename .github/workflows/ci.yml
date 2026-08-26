@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  generator-tests:
+    name: Generator unit + e2e tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build-generated-project:
+    name: Build & test the generated C++ project
+    runs-on: ubuntu-latest
+    needs: generator-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      - name: Install C++ toolchain (protobuf, mosquitto)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake protobuf-compiler libprotobuf-dev libmosquitto-dev
+
+      - name: Generate a sample project from the fixture spec
+        run: |
+          npx asyncapi generate fromTemplate test/fixtures/fleet-sample.yaml . \
+            -p lang=cpp -p projectName=demo_bus \
+            -o /tmp/generated-demo-bus --force-write
+
+      - name: Configure, build and test the generated project
+        run: |
+          cmake -S /tmp/generated-demo-bus -B /tmp/generated-demo-bus/build
+          cmake --build /tmp/generated-demo-bus/build -j"$(nproc)"
+          ctest --test-dir /tmp/generated-demo-bus/build --output-on-failure

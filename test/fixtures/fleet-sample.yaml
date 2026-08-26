@@ -1,0 +1,149 @@
+asyncapi: '3.1.0'
+
+info:
+  title: Sample Fleet MQTT API
+  version: '1.0.0'
+  description: Generic fixture spec covering multiple proto packages, an enum, a repeated field,
+    a message reused across channels, and an empty message.
+
+servers:
+  production:
+    host: '{host}:1883'
+    protocol: mqtt
+    variables:
+      host:
+        default: localhost
+
+defaultContentType: application/json
+
+channels:
+  deviceHeartbeat:
+    address: 'device/heartbeat'
+    messages:
+      Heartbeat:
+        $ref: '#/components/messages/Heartbeat'
+
+  motorCommand:
+    address: 'motor/command'
+    messages:
+      MotorCommand:
+        $ref: '#/components/messages/MotorCommand'
+
+  motorMode:
+    address: 'motor/mode'
+    messages:
+      MotorModeCmd:
+        $ref: '#/components/messages/MotorModeCmd'
+
+  motorEcho:
+    address: 'motor/echo'
+    messages:
+      MotorCommand:
+        $ref: '#/components/messages/MotorCommand'
+
+  deviceImu:
+    address: 'device/imu'
+    messages:
+      ImuSample:
+        $ref: '#/components/messages/ImuSample'
+
+  resetCommand:
+    address: 'device/reset'
+    messages:
+      ResetCommand:
+        $ref: '#/components/messages/ResetCommand'
+
+operations:
+  sendMotorCommand:
+    action: send
+    channel:
+      $ref: '#/channels/motorCommand'
+    messages:
+      - $ref: '#/channels/motorCommand/messages/MotorCommand'
+
+  receiveMotorCommand:
+    action: receive
+    channel:
+      $ref: '#/channels/motorCommand'
+    messages:
+      - $ref: '#/channels/motorCommand/messages/MotorCommand'
+
+components:
+  messages:
+    Heartbeat:
+      name: Heartbeat
+      title: Device Heartbeat
+      contentType: application/json
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package fleet.telemetry;
+          // samples[0]=battery percent, samples[1]=signal strength, samples[2..5] reserved
+          message Heartbeat {
+            repeated float samples  = 1;
+            repeated int32 counters = 2;
+          }
+
+    MotorCommand:
+      name: MotorCommand
+      title: Motor Command
+      contentType: text/plain
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package fleet.control;
+          message MotorCommand {
+            float left_speed  = 1;
+            float right_speed = 2;
+          }
+
+    MotorModeCmd:
+      name: MotorModeCmd
+      title: Motor Mode
+      contentType: text/plain
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package fleet.control;
+          enum MotorMode {
+            MOTOR_MODE_MANUAL    = 0;
+            MOTOR_MODE_AUTOMATIC = 1;
+            MOTOR_MODE_HOLD      = 2;
+          }
+          message MotorModeCmd {
+            MotorMode mode = 1;
+          }
+
+    ImuSample:
+      name: ImuSample
+      title: IMU Sample
+      contentType: application/octet-stream
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package fleet.sensors;
+          message ImuSample {
+            double timestamp_sec = 1;
+            float  xacc          = 2;
+            float  yacc          = 3;
+            float  zacc          = 4;
+            float  xgyro         = 5;
+            float  ygyro         = 6;
+            float  zgyro         = 7;
+          }
+
+    ResetCommand:
+      name: ResetCommand
+      title: Reset Command
+      description: Any payload triggers a reset.
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package fleet.commands;
+          // Empty message — publishing triggers the reset
+          message ResetCommand {}
