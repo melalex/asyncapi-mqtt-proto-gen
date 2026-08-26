@@ -7,6 +7,7 @@ const { slugify } = require('./naming');
 // exporting buildProject(model, params, extra), then add it here. No other file needs to change.
 const LANGUAGES = {
   cpp: require('./languages/cpp'),
+  python: require('./languages/python'),
 };
 
 /**

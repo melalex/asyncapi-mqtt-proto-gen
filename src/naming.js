@@ -30,4 +30,31 @@ function assertValidCppIdentifier(name, context) {
   return name;
 }
 
-module.exports = { slugify, toUpperSnake, assertValidCppIdentifier };
+/**
+ * lower_snake_case, suitable for Python attribute/module names. Converts camelCase/PascalCase
+ * spec identifiers (e.g. AsyncAPI channel ids) into idiomatic Python names, e.g. "motorCommand"
+ * -> "motor_command". Existing underscores/separators are preserved and normalized.
+ */
+function toSnakeCase(text) {
+  return String(text)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
+/** Validates/normalizes a string into a legal Python identifier; throws if it can't be made into one. */
+function assertValidPythonIdentifier(name, context) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`${context}: "${name}" is not a valid Python identifier`);
+  }
+  return name;
+}
+
+module.exports = {
+  slugify,
+  toUpperSnake,
+  toSnakeCase,
+  assertValidCppIdentifier,
+  assertValidPythonIdentifier,
+};

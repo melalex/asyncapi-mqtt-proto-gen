@@ -96,12 +96,18 @@ components:
       name: A
       payload:
         schemaFormat: 'application/vnd.google.protobuf;version=3'
-        schema: 'syntax = "proto3";\\npackage p;\\nmessage A { int32 x = 1; }\\n'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message A { int32 x = 1; }
     B:
       name: B
       payload:
         schemaFormat: 'application/vnd.google.protobuf;version=3'
-        schema: 'syntax = "proto3";\\npackage p;\\nmessage B { int32 x = 1; }\\n'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message B { int32 x = 1; }
 `);
     expect(() => parseAsyncApiDocument(document)).toThrow(/exactly one message/);
   });
