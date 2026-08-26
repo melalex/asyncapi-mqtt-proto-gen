@@ -1,9 +1,17 @@
 {
   "name": "asyncapi-mqtt-proto-gen",
   "version": "0.1.0",
-  "description": "AsyncAPI Generator template that turns an inline-proto MQTT AsyncAPI spec into a typed client project (messageBus.<channel>.publish/subscribe/address). Run with: asyncapi generate fromTemplate <spec> <this-repo> -p lang=cpp -p projectName=<name>",
+  "description": "AsyncAPI Generator template that turns an inline-proto MQTT AsyncAPI spec into a typed client project (messageBus.<channel>.publish/subscribe/address). Run with: asyncapi generate fromTemplate <spec> https://github.com/melalex/asyncapi-mqtt-proto-gen -p lang=cpp -p projectName=<name>",
   "private": true,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/melalex/asyncapi-mqtt-proto-gen.git"
+  },
+  "homepage": "https://github.com/melalex/asyncapi-mqtt-proto-gen",
+  "bugs": {
+    "url": "https://github.com/melalex/asyncapi-mqtt-proto-gen/issues"
+  },
   "engines": {
     "node": ">=18"
   },

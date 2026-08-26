@@ -17,7 +17,7 @@ messageBus.controlRouterInput.address;   // "some/topic"
 ## Usage
 
 ```sh
-asyncapi generate fromTemplate <spec>.yaml <this-repo> -p lang=cpp -p projectName=my_project
+asyncapi generate fromTemplate <spec>.yaml https://github.com/melalex/asyncapi-mqtt-proto-gen -p lang=cpp -p projectName=my_project
 ```
 
 | Parameter     | Required | Default                  | Description                                                              |
