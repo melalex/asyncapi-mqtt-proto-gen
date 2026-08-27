@@ -51,10 +51,20 @@ function assertValidPythonIdentifier(name, context) {
   return name;
 }
 
+/** PascalCase, suitable for a UMD global variable name, e.g. "demo_bus" -> "DemoBus". */
+function toPascalCase(text) {
+  return String(text)
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('');
+}
+
 module.exports = {
   slugify,
   toUpperSnake,
   toSnakeCase,
+  toPascalCase,
   assertValidCppIdentifier,
   assertValidPythonIdentifier,
 };

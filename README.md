@@ -18,7 +18,14 @@ message_bus.control_router_input.publish(msg)
 message_bus.control_router_input.address  # "some/topic"
 ```
 
-`publish`/`subscribe` always use protobuf binary encoding (`SerializeToString`/`ParseFromString`).
+```js
+messageBus.controlRouterInput.subscribe((msg) => handle(msg));
+messageBus.controlRouterInput.publish(msg);
+messageBus.controlRouterInput.address; // "some/topic"
+```
+
+`publish`/`subscribe` always use protobuf binary encoding (`SerializeToString`/`ParseFromString`,
+or protobufjs's `encode`/`decode` for `js`).
 
 ## Usage
 
@@ -28,8 +35,8 @@ asyncapi generate fromTemplate <spec>.yaml https://github.com/melalex/asyncapi-m
 
 | Parameter     | Required | Default                  | Description                                                                          |
 |---------------|----------|---------------------------|----------------------------------------------------------------------------------------|
-| `lang`        | yes      | —                          | Target language: `cpp` or `python`.                                                    |
-| `projectName` | no       | slug of `info.title`      | CMake project name / Python package name (include directory, namespace) for the client. |
+| `lang`        | yes      | —                          | Target language: `cpp`, `python`, or `js`.                                             |
+| `projectName` | no       | slug of `info.title`      | CMake project name / Python package name / npm package name (include directory, namespace) for the client. |
 
 ### Supported languages
 
@@ -73,11 +80,40 @@ codegen derives the generated module's *path* from the `.proto` file's own path 
 snake_cased into Python attribute names (`controlRouterInput` → `control_router_input`); the
 MQTT `address` itself is untouched.
 
-Both backends share the same scope limits: exactly one message per channel, and publish/subscribe
-always use protobuf binary — any legacy per-message wire-format notes in a spec are ignored (proto
-is treated as the canonical, target encoding).
+#### `js`
 
-See [Adding a language](#adding-a-language) below for how a third language would slot in.
+```
+<project>/
+├── package.json            # "type": "module", pbjs script, Vite build/test scripts
+├── vite.config.js          # Bundler configuration (Library Mode: es + umd output)
+├── .gitignore
+├── README.md
+├── proto/                  # One .proto file per proto package (flat, like the cpp backend)
+├── src/
+│   ├── index.js             # Public API exported to consumers
+│   ├── client.js             # MessageBus / Channel / MqttJsTransport
+│   └── generated/            # messages.js, compiled from proto/*.proto by `npm run proto` (untracked)
+├── tests/                  # Vitest tests using an in-memory MQTT transport (no broker needed)
+└── dist/                   # <project>.es.js + <project>.umd.js, built by `npm run build` (untracked)
+```
+
+Plain JavaScript, no TypeScript. MQTT transport is
+[MQTT.js](https://github.com/mqttjs/MQTT.js) (`mqtt` on npm) — **browsers can only speak MQTT over
+WebSockets**, so the broker needs a websocket listener (e.g. Mosquitto's `protocol websockets`),
+not just the usual TCP 1883. `.proto` files are compiled with `pbjs` (`protobufjs-cli`, `-t
+static-module -w es6`) into a single combined `src/generated/messages.js`; pbjs preserves each
+`.proto` file's own `package` statement as a nested namespace in that one file
+(`messages.fleet.control.MotorCommand`), so there's no naming collision risk from combining
+multiple proto files into one generated module. Channel ids are used as-is for `Channel`
+properties (already camelCase in the spec, so — unlike the python backend — no case conversion is
+needed). `Channel.publish`/`.subscribe` use protobufjs's static `Type.encode(...).finish()` /
+`Type.decode(...)`, not instance methods.
+
+All three backends share the same scope limits: exactly one message per channel, and
+publish/subscribe always use protobuf binary — any legacy per-message wire-format notes in a spec
+are ignored (proto is treated as the canonical, target encoding).
+
+See [Adding a language](#adding-a-language) below for how a fourth language would slot in.
 
 ## How it works
 
@@ -93,9 +129,9 @@ templating:
 - `src/model.js` + `src/proto-extract.js` build a shared, language-agnostic IR from the AsyncAPI
   document: one entry per channel, plus every proto `message`/`enum` declaration grouped by
   package and deduplicated by name (the same message is commonly referenced by multiple channels).
-- `src/proto-emit.js` is the shared "one `.proto` file per package" renderer both `languages/cpp`
-  and `languages/python` call (with a different output-path prefix — see the `python` section
-  above for why the prefix differs).
+- `src/proto-emit.js` is the shared "one `.proto` file per package" renderer `languages/cpp`,
+  `languages/python`, and `languages/js` all call (with a different output-path prefix — see the
+  `python` section above for why its prefix differs from the other two).
 - `src/languages/<lang>/*.js` renders the IR into the full project as a `Map<relativePath,
   content>`.
 - `hooks/index.js`'s `generate:before` hook pre-creates every output directory the render will
@@ -108,7 +144,8 @@ templating:
 ### Adding a language
 
 1. Implement `src/languages/<lang>/index.js` exporting `buildProject(model, params, extra) ->
-   Array<{ path, content }>` (see `src/languages/cpp/index.js` or `src/languages/python/index.js`).
+   Array<{ path, content }>` (see `src/languages/cpp`, `src/languages/python`, or
+   `src/languages/js` for the pattern).
 2. Register it in the `LANGUAGES` map in `src/build.js`.
 
 Nothing else changes — `hooks/index.js` and `template/index.js` are language-agnostic.
@@ -121,9 +158,9 @@ npm test          # unit tests (src/model.js, src/languages/*) + real end-to-end
                    # actual `asyncapi generate fromTemplate` CLI, for every supported language
 ```
 
-`npm run generate:example` (cpp) / `npm run generate:example:python` runs the template against the
-bundled fixture spec (`test/fixtures/fleet-sample.yaml`) and writes a full sample project to
-`/tmp`, useful for poking at real generated output by hand:
+`npm run generate:example` (cpp) / `generate:example:python` / `generate:example:js` run the
+template against the bundled fixture spec (`test/fixtures/fleet-sample.yaml`) and write a full
+sample project to `/tmp`, useful for poking at real generated output by hand:
 
 ```sh
 npm run generate:example
@@ -136,6 +173,12 @@ ctest --test-dir /tmp/asyncapi-mqtt-proto-gen-example/build
 npm run generate:example:python
 cd /tmp/asyncapi-mqtt-proto-gen-example-py
 make test   # make dev && make proto && pytest
+```
+
+```sh
+npm run generate:example:js
+cd /tmp/asyncapi-mqtt-proto-gen-example-js
+npm install && npm run build && npm test   # proto (pbjs) + vite build, then vitest
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm test` and then does exactly those build+test cycles, one

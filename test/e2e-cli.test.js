@@ -90,6 +90,34 @@ describe('end-to-end: asyncapi generate fromTemplate', () => {
     });
   });
 
+  describe('-p lang=js', () => {
+    let outDir;
+
+    beforeAll(() => {
+      outDir = tmpOutDir('js');
+      generate('js', outDir);
+    });
+
+    it('writes the full project tree to disk, matching what buildFiles computed', () => {
+      const expected = [
+        '.gitignore',
+        'README.md',
+        'package.json',
+        'vite.config.js',
+        'proto/commands.proto',
+        'proto/control.proto',
+        'proto/sensors.proto',
+        'proto/telemetry.proto',
+        'src/client.js',
+        'src/index.js',
+        'tests/client.test.js',
+      ];
+      for (const relPath of expected) {
+        expect(fs.existsSync(path.join(outDir, relPath))).toBe(true);
+      }
+    });
+  });
+
   it('rejects an unsupported lang with a clear CLI error', () => {
     expect(() => generate('rust', tmpOutDir('bad'))).toThrow();
   });
