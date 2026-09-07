@@ -24,8 +24,14 @@ messageBus.controlRouterInput.publish(msg);
 messageBus.controlRouterInput.address; // "some/topic"
 ```
 
+```ts
+messageBus.controlRouterInput.subscribe((msg) => handle(msg)); // msg: some.protocol.Message
+messageBus.controlRouterInput.publish(msg);
+messageBus.controlRouterInput.address; // "some/topic"
+```
+
 `publish`/`subscribe` always use protobuf binary encoding (`SerializeToString`/`ParseFromString`,
-or protobufjs's `encode`/`decode` for `js`).
+protobufjs's `encode`/`decode` for `js`, or ts-proto's `encode`/`decode` for `ts`).
 
 ## Usage
 
@@ -35,7 +41,7 @@ asyncapi generate fromTemplate <spec>.yaml https://github.com/melalex/asyncapi-m
 
 | Parameter     | Required | Default                  | Description                                                                          |
 |---------------|----------|---------------------------|----------------------------------------------------------------------------------------|
-| `lang`        | yes      | —                          | Target language: `cpp`, `python`, or `js`.                                             |
+| `lang`        | yes      | —                          | Target language: `cpp`, `python`, `js`, or `ts`.                                       |
 | `projectName` | no       | slug of `info.title`      | CMake project name / Python package name / npm package name (include directory, namespace) for the client. |
 
 ### Supported languages
@@ -97,7 +103,7 @@ MQTT `address` itself is untouched.
 └── dist/                   # <project>.es.js + <project>.umd.js, built by `npm run build` (untracked)
 ```
 
-Plain JavaScript, no TypeScript. MQTT transport is
+Plain JavaScript — see the [`ts`](#ts) target for a typed TypeScript client. MQTT transport is
 [MQTT.js](https://github.com/mqttjs/MQTT.js) (`mqtt` on npm) — **browsers can only speak MQTT over
 WebSockets**, so the broker needs a websocket listener (e.g. Mosquitto's `protocol websockets`),
 not just the usual TCP 1883. `.proto` files are compiled with `pbjs` (`protobufjs-cli`, `-t
@@ -109,11 +115,41 @@ properties (already camelCase in the spec, so — unlike the python backend — 
 needed). `Channel.publish`/`.subscribe` use protobufjs's static `Type.encode(...).finish()` /
 `Type.decode(...)`, not instance methods.
 
-All three backends share the same scope limits: exactly one message per channel, and
+#### `ts`
+
+```
+<project>/
+├── package.json            # "type": "module", buf generate script, Vite build/test/typecheck scripts
+├── tsconfig.json           # strict, declaration output
+├── buf.yaml, buf.gen.yaml  # buf + protoc-gen-ts_proto config (no system protoc needed)
+├── vite.config.ts          # Bundler configuration (Library Mode: es + umd + .d.ts output)
+├── .gitignore
+├── README.md
+├── proto/                  # One .proto file per proto package (flat, like the js backend)
+├── src/
+│   ├── index.ts             # Public API exported to consumers
+│   ├── client.ts             # MessageBus / Channel<T> / MqttJsTransport, real MqttTransport interface
+│   ├── messages.ts           # Barrel re-exporting each generated proto module as a namespace
+│   └── generated/            # <pkg>.ts, compiled from proto/*.proto by `npm run proto` (untracked)
+├── tests/                  # Vitest tests using an in-memory MQTT transport (no broker needed)
+└── dist/                   # <project>.es.js + <project>.umd.js + *.d.ts, built by `npm run build` (untracked)
+```
+
+The typed sibling of the `js` backend: same Vite (library mode, es + umd) + Vitest + MQTT.js
+stack, MQTT-over-WebSocket only (same broker note as `js`). Proto codegen is
+[ts-proto](https://github.com/stephenh/ts-proto) driven by the [`buf`](https://buf.build) CLI —
+both pulled in by `npm install`, so **no system `protoc`** is needed (mirroring the `python`
+backend's `grpcio-tools`). Each `proto/<pkg>.proto` compiles to `src/generated/<pkg>.ts`;
+`src/messages.ts` re-exports them as namespaces (`messages.control.MotorCommand`). The transport
+is a real `interface MqttTransport`, and each channel is a generic `Channel<T>` typed to its
+message. `Channel.publish`/`.subscribe` use ts-proto's `Type.encode(...).finish()` /
+`Type.decode(...)`. Channel ids are used as-is (same as `js`).
+
+All four backends share the same scope limits: exactly one message per channel, and
 publish/subscribe always use protobuf binary — any legacy per-message wire-format notes in a spec
 are ignored (proto is treated as the canonical, target encoding).
 
-See [Adding a language](#adding-a-language) below for how a fourth language would slot in.
+See [Adding a language](#adding-a-language) below for how a fifth language would slot in.
 
 ## How it works
 
@@ -130,8 +166,8 @@ templating:
   document: one entry per channel, plus every proto `message`/`enum` declaration grouped by
   package and deduplicated by name (the same message is commonly referenced by multiple channels).
 - `src/proto-emit.js` is the shared "one `.proto` file per package" renderer `languages/cpp`,
-  `languages/python`, and `languages/js` all call (with a different output-path prefix — see the
-  `python` section above for why its prefix differs from the other two).
+  `languages/python`, `languages/js`, and `languages/ts` all call (with a different output-path
+  prefix — see the `python` section above for why its prefix differs from the others).
 - `src/languages/<lang>/*.js` renders the IR into the full project as a `Map<relativePath,
   content>`.
 - `hooks/index.js`'s `generate:before` hook pre-creates every output directory the render will
@@ -144,8 +180,8 @@ templating:
 ### Adding a language
 
 1. Implement `src/languages/<lang>/index.js` exporting `buildProject(model, params, extra) ->
-   Array<{ path, content }>` (see `src/languages/cpp`, `src/languages/python`, or
-   `src/languages/js` for the pattern).
+   Array<{ path, content }>` (see `src/languages/cpp`, `src/languages/python`, `src/languages/js`,
+   or `src/languages/ts` for the pattern).
 2. Register it in the `LANGUAGES` map in `src/build.js`.
 
 Nothing else changes — `hooks/index.js` and `template/index.js` are language-agnostic.
@@ -158,9 +194,10 @@ npm test          # unit tests (src/model.js, src/languages/*) + real end-to-end
                    # actual `asyncapi generate fromTemplate` CLI, for every supported language
 ```
 
-`npm run generate:example` (cpp) / `generate:example:python` / `generate:example:js` run the
-template against the bundled fixture spec (`test/fixtures/fleet-sample.yaml`) and write a full
-sample project to `/tmp`, useful for poking at real generated output by hand:
+`npm run generate:example` (cpp) / `generate:example:python` / `generate:example:js` /
+`generate:example:ts` run the template against the bundled fixture spec
+(`test/fixtures/fleet-sample.yaml`) and write a full sample project to `/tmp`, useful for poking
+at real generated output by hand:
 
 ```sh
 npm run generate:example
@@ -179,6 +216,12 @@ make test   # make dev && make proto && pytest
 npm run generate:example:js
 cd /tmp/asyncapi-mqtt-proto-gen-example-js
 npm install && npm run build && npm test   # proto (pbjs) + vite build, then vitest
+```
+
+```sh
+npm run generate:example:ts
+cd /tmp/asyncapi-mqtt-proto-gen-example-ts
+npm install && npm run build && npm run typecheck && npm test   # buf generate (ts-proto) + vite build, tsc, then vitest
 ```
 
 CI (`.github/workflows/ci.yml`) runs `npm test` and then does exactly those build+test cycles, one
