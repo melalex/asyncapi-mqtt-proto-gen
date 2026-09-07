@@ -1,5 +1,7 @@
 'use strict';
 
+const { groupChannels } = require('../../channel-groups');
+
 // A conservative, ASCII-only check (same rules as the python backend's identifier validation).
 // JS identifiers technically also allow `$`/unicode, but every real AsyncAPI channel id in
 // practice is already camelCase ASCII, and this keeps generated code as plain `this.foo = ...`
@@ -29,26 +31,52 @@ function channelViewModels(channels) {
 function buildClientFiles(model, ctx) {
   const { projectName } = ctx;
   const channels = channelViewModels(model.channels);
+  const { flat, groups } = groupChannels(channels);
 
-  const channelProps = channels
+  // `messageBus.<channel>` for a Channel with no tags; `new Channel(...)` expression for a member
+  // of a tag group. `indent` is the leading whitespace for the `new Channel(` line.
+  const channelExpr = (c, indent) =>
+    `new Channel(\n${indent}  "${c.address}", ${c.typeRef}, this._transport, this._dispatch\n${indent})`;
+
+  const flatProps = flat
     .map((c) => {
       const doc = c.description ? `    // ${c.description.trim().split('\n')[0]}\n` : '';
-      return (
-        `${doc}    this.${c.id} = new Channel(\n` +
-        `      "${c.address}", ${c.typeRef}, this._transport, this._dispatch\n` +
-        `    );`
-      );
+      return `${doc}    this.${c.id} = ${channelExpr(c, '    ')};`;
     })
     .join('\n');
+
+  const groupProps = groups
+    .map((g) => {
+      const members = g.channels
+        .map((c) => {
+          const doc = c.description ? `      // ${c.description.trim().split('\n')[0]}\n` : '';
+          return `${doc}      ${c.id}: ${channelExpr(c, '      ')},`;
+        })
+        .join('\n');
+      return `    // tag: ${g.tags.join(', ')}\n    this.${g.name} = {\n${members}\n    };`;
+    })
+    .join('\n');
+
+  const channelProps = [flatProps, groupProps].filter(Boolean).join('\n');
+
+  // Example accessor path for the docstring: a tagged channel becomes messageBus.<tag>.<channel>,
+  // an untagged one stays messageBus.<channel>.
+  const examplePath = groups[0]
+    ? `${groups[0].name}.${groups[0].channels[0].id}`
+    : flat[0]
+      ? flat[0].id
+      : 'someChannel';
 
   const clientJs = `/**
  * Generated MQTT message-bus client for ${projectName}. Do not edit by hand.
  *
- * Every channel from the spec is exposed as a typed \`Channel\` property on \`MessageBus\`:
+ * Each spec channel is exposed as a typed \`Channel\` on \`MessageBus\`. A channel that carries
+ * AsyncAPI tags is nested under each tag (slugified): \`messageBus.<tag>.<channel>\`; a channel
+ * with no tags stays top-level: \`messageBus.<channel>\`.
  *
- *   messageBus.${channels[0] ? channels[0].id : 'someChannel'}.subscribe((msg) => handle(msg));
- *   messageBus.${channels[0] ? channels[0].id : 'someChannel'}.publish(msg);
- *   messageBus.${channels[0] ? channels[0].id : 'someChannel'}.address;
+ *   messageBus.${examplePath}.subscribe((msg) => handle(msg));
+ *   messageBus.${examplePath}.publish(msg);
+ *   messageBus.${examplePath}.address;
  *
  * publish()/subscribe() always use protobuf binary encoding (Type.encode(...).finish() /
  * Type.decode(...) — protobufjs's static API, see src/generated/messages.js).

@@ -11,7 +11,7 @@ const { extractProtoDeclarations } = require('./proto-extract');
  * @param {import('@asyncapi/parser').AsyncAPIDocument} asyncapiDoc parsed AsyncAPI document
  * @returns {{
  *   channels: Array<{ id: string, address: string, description: string|undefined,
- *                      protoPackage: string, protoMessageType: string }>,
+ *                      tags: string[], protoPackage: string, protoMessageType: string }>,
  *   protoPackages: Map<string, Map<string, { kind: string, name: string, text: string }>>
  * }}
  */
@@ -99,6 +99,9 @@ function parseAsyncApiDocument(asyncapiDoc) {
       id: channelId,
       address: channel.address(),
       description: channel.description ? channel.description() : undefined,
+      // AsyncAPI v3 tags on the channel; drive the grouped client API (messageBus.<tag>.<channel>).
+      // Always a (possibly empty) array — channel.tags() returns an empty collection when absent.
+      tags: channel.tags ? channel.tags().all().map((t) => t.name()) : [],
       protoPackage,
       protoMessageType,
     });

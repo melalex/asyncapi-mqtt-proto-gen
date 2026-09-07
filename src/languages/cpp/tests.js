@@ -1,5 +1,7 @@
 'use strict';
 
+const { groupChannels } = require('../../channel-groups');
+
 function protoNamespace(protoPackage) {
   return protoPackage.split('.').join('::');
 }
@@ -14,9 +16,12 @@ function protoNamespace(protoPackage) {
  */
 function buildTestFiles(model, ctx) {
   const { projectName } = ctx;
-  const channels = model.channels;
+  const { flat, groups } = groupChannels(model.channels);
 
-  const testCases = channels.map((c) => testCasesFor(projectName, c)).join('\n');
+  const testCases = [
+    ...flat.map((c) => testCasesFor(projectName, c)),
+    ...groups.flatMap((g) => g.channels.map((c) => testCasesFor(projectName, c, g.name))),
+  ].join('\n');
 
   const content = `// Generated tests: one publish/subscribe/address check per channel, using the in-memory
 // FakeMqttTransport so no real MQTT broker is needed.
@@ -36,25 +41,27 @@ ${testCases}`;
   ];
 }
 
-function testCasesFor(projectName, channel) {
+function testCasesFor(projectName, channel, groupName) {
   const type = `${protoNamespace(channel.protoPackage)}::${channel.protoMessageType}`;
-  const tag = `[${channel.id}]`;
+  const accessor = groupName ? `bus.${groupName}.${channel.id}` : `bus.${channel.id}`;
+  const label = groupName ? `${groupName}.${channel.id}` : channel.id;
+  const tag = groupName ? `[${groupName}][${channel.id}]` : `[${channel.id}]`;
   const address = channel.address;
 
-  return `TEST_CASE("${channel.id}.address matches the spec", "${tag}") {
+  return `TEST_CASE("${label}.address matches the spec", "${tag}") {
   auto transport = std::make_unique<${projectName}::testing::FakeMqttTransport>();
   ${projectName}::MessageBus bus(std::move(transport));
 
-  CHECK(bus.${channel.id}.address == "${address}");
+  CHECK(${accessor}.address == "${address}");
 }
 
-TEST_CASE("${channel.id}.publish sends a protobuf-encoded message to its topic", "${tag}") {
+TEST_CASE("${label}.publish sends a protobuf-encoded message to its topic", "${tag}") {
   auto transport = std::make_unique<${projectName}::testing::FakeMqttTransport>();
   auto* rawTransport = transport.get();
   ${projectName}::MessageBus bus(std::move(transport));
 
   ${type} message;
-  bus.${channel.id}.publish(message);
+  ${accessor}.publish(message);
 
   REQUIRE(rawTransport->published.size() == 1);
   CHECK(rawTransport->published[0].topic == "${address}");
@@ -63,13 +70,13 @@ TEST_CASE("${channel.id}.publish sends a protobuf-encoded message to its topic",
   CHECK(roundTripped.ParseFromString(rawTransport->published[0].payload));
 }
 
-TEST_CASE("${channel.id}.subscribe dispatches incoming messages on its topic", "${tag}") {
+TEST_CASE("${label}.subscribe dispatches incoming messages on its topic", "${tag}") {
   auto transport = std::make_unique<${projectName}::testing::FakeMqttTransport>();
   auto* rawTransport = transport.get();
   ${projectName}::MessageBus bus(std::move(transport));
 
   bool received = false;
-  bus.${channel.id}.subscribe([&received](const ${type}&) { received = true; });
+  ${accessor}.subscribe([&received](const ${type}&) { received = true; });
 
   REQUIRE(rawTransport->subscribedTopics.size() == 1);
   CHECK(rawTransport->subscribedTopics[0] == "${address}");

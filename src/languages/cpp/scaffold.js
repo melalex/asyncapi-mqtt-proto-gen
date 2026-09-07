@@ -1,5 +1,7 @@
 'use strict';
 
+const { groupChannels } = require('../../channel-groups');
+
 /**
  * Emits CMakeLists.txt, .gitignore and README.md for the generated project.
  *
@@ -118,12 +120,17 @@ build-*/
 
 function readme(model, ctx) {
   const { projectName, specTitle } = ctx;
-  const exampleChannel = model.channels[0];
+  const { flat, groups } = groupChannels(model.channels);
+  const exampleChannel = groups[0] ? groups[0].channels[0] : flat[0];
   const protoFiles = [...model.protoPackages.keys()].map((pkg) => `proto/${pkg.split('.').pop()}.proto`).sort();
   const exampleType = exampleChannel
     ? `${exampleChannel.protoPackage.split('.').join('::')}::${exampleChannel.protoMessageType}`
     : 'YourMessageType';
-  const exampleChannelId = exampleChannel ? exampleChannel.id : 'yourChannel';
+  const exampleChannelId = groups[0]
+    ? `${groups[0].name}.${groups[0].channels[0].id}`
+    : exampleChannel
+      ? exampleChannel.id
+      : 'yourChannel';
   const exampleAddress = exampleChannel ? exampleChannel.address : 'your/topic';
 
   return `# ${projectName}
@@ -131,7 +138,9 @@ function readme(model, ctx) {
 C++ MQTT client generated from **${specTitle}** by [asyncapi-mqtt-proto-gen](https://github.com/) \\
 (\`asyncapi generate fromTemplate <spec>.yaml <this-generator> -p lang=cpp -p projectName=${projectName}\`).
 
-Every channel in the spec becomes a typed member of \`${projectName}::MessageBus\`:
+Every channel in the spec becomes a typed \`Channel\` on \`${projectName}::MessageBus\`. A channel that
+carries AsyncAPI tags is nested under each tag (slugified) — \`messageBus.<tag>.<channel>\`; a channel
+with no tags stays top-level — \`messageBus.<channel>\`. Multi-tag channels appear under each.
 
 \`\`\`cpp
 #include "${projectName}/message_bus.hpp"

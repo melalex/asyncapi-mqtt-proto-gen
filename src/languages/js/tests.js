@@ -1,6 +1,7 @@
 'use strict';
 
 const { channelViewModels } = require('./client');
+const { groupChannels } = require('../../channel-groups');
 
 /**
  * Emits tests/client.test.js: an in-memory FakeMqttTransport plus a publish/subscribe/address
@@ -10,8 +11,11 @@ const { channelViewModels } = require('./client');
  * @returns {Array<{ path: string, content: string }>}
  */
 function buildTestFiles(model) {
-  const channels = channelViewModels(model.channels);
-  const testCases = channels.map((c) => testCasesFor(c)).join('\n');
+  const { flat, groups } = groupChannels(channelViewModels(model.channels));
+  const testCases = [
+    ...flat.map((c) => testCasesFor(c)),
+    ...groups.flatMap((g) => g.channels.map((c) => testCasesFor(c, g.name))),
+  ].join('\n');
 
   const content = `// Generated tests: one publish/subscribe/address check per channel, using the in-memory
 // FakeMqttTransport so no real MQTT broker is needed.
@@ -62,22 +66,24 @@ ${testCases}`;
   return [{ path: 'tests/client.test.js', content }];
 }
 
-function testCasesFor(channel) {
+function testCasesFor(channel, groupName) {
   const { id, typeRef, address } = channel;
+  const accessor = groupName ? `bus.${groupName}.${id}` : `bus.${id}`;
+  const label = groupName ? `${groupName}.${id}` : id;
 
-  return `describe("${id}", () => {
+  return `describe("${label}", () => {
   it("address matches the spec", () => {
     const transport = new FakeMqttTransport();
     const bus = new MessageBus(undefined, transport);
 
-    expect(bus.${id}.address).toBe("${address}");
+    expect(${accessor}.address).toBe("${address}");
   });
 
   it("publish sends a protobuf-encoded message to its topic", () => {
     const transport = new FakeMqttTransport();
     const bus = new MessageBus(undefined, transport);
 
-    bus.${id}.publish(${typeRef}.create({}));
+    ${accessor}.publish(${typeRef}.create({}));
 
     expect(transport.published).toHaveLength(1);
     expect(transport.published[0].topic).toBe("${address}");
@@ -89,7 +95,7 @@ function testCasesFor(channel) {
     const bus = new MessageBus(undefined, transport);
 
     let received = null;
-    bus.${id}.subscribe((msg) => {
+    ${accessor}.subscribe((msg) => {
       received = msg;
     });
 

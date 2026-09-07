@@ -68,23 +68,90 @@ describe('cpp buildProject (via src/build.js)', () => {
     expect(byPath['proto/commands.proto']).toContain('message ResetCommand {}');
   });
 
-  it('declares one Channel<T> member per channel, named after the channel id', () => {
+  it('exposes an untagged channel as a direct Channel<T> member, named after the channel id', () => {
     const hpp = byPath['include/demo_bus/message_bus.hpp'];
-    expect(hpp).toContain('Channel<fleet::control::MotorCommand> motorCommand{"motor/command"');
-    expect(hpp).toContain('Channel<fleet::control::MotorCommand> motorEcho{"motor/echo"');
-    expect(hpp).toContain('Channel<fleet::control::MotorModeCmd> motorMode{"motor/mode"');
-    expect(hpp).toContain('Channel<fleet::telemetry::Heartbeat> deviceHeartbeat{"device/heartbeat"');
+    expect(hpp).toContain('Channel<fleet::commands::ResetCommand> resetCommand{"device/reset"');
     expect(hpp).toContain('#include "control.pb.h"');
     expect(hpp).toContain('#include "telemetry.pb.h"');
   });
 
-  it('generates a publish/subscribe/address test case per channel', () => {
+  it('nests a tagged channel under one struct per slugified tag (messageBus.<tag>.<channel>)', () => {
+    const hpp = byPath['include/demo_bus/message_bus.hpp'];
+    // tag "motor"
+    expect(hpp).toContain('struct MotorGroup {');
+    expect(hpp).toContain('Channel<fleet::control::MotorCommand> motorCommand;');
+    expect(hpp).toContain('Channel<fleet::control::MotorModeCmd> motorMode;');
+    expect(hpp).toContain('} motor{*transport_, dispatch_};');
+    expect(hpp).toContain('motorCommand("motor/command", transport, dispatch)');
+    // tag "Device Telemetry" -> slugified
+    expect(hpp).toContain('struct DeviceTelemetryGroup {');
+    expect(hpp).toContain('} device_telemetry{*transport_, dispatch_};');
+  });
+
+  it('places a channel with several tags under every one of its groups', () => {
+    const hpp = byPath['include/demo_bus/message_bus.hpp'];
+    // motorEcho is tagged both "motor" and "diagnostics"
+    expect(hpp).toContain('struct DiagnosticsGroup {');
+    expect(hpp).toMatch(/struct DiagnosticsGroup \{[\s\S]*?Channel<fleet::control::MotorCommand> motorEcho;[\s\S]*?\} diagnostics\{/);
+    expect(hpp).toMatch(/struct MotorGroup \{[\s\S]*?Channel<fleet::control::MotorCommand> motorEcho;[\s\S]*?\} motor\{/);
+  });
+
+  it('generates a publish/subscribe/address test case per channel, through its accessor path', () => {
     const cpp = byPath['tests/test_messages.cpp'];
-    for (const channelId of ['deviceHeartbeat', 'motorCommand', 'motorMode', 'motorEcho', 'deviceImu', 'resetCommand']) {
-      expect(cpp).toContain(`bus.${channelId}.address`);
-      expect(cpp).toContain(`bus.${channelId}.publish(message)`);
-      expect(cpp).toContain(`bus.${channelId}.subscribe(`);
+    const accessors = [
+      'bus.resetCommand',
+      'bus.device_telemetry.deviceHeartbeat',
+      'bus.device_telemetry.deviceImu',
+      'bus.motor.motorCommand',
+      'bus.motor.motorMode',
+      'bus.motor.motorEcho',
+      'bus.diagnostics.motorEcho',
+    ];
+    for (const accessor of accessors) {
+      expect(cpp).toContain(`${accessor}.address`);
+      expect(cpp).toContain(`${accessor}.publish(message)`);
+      expect(cpp).toContain(`${accessor}.subscribe(`);
     }
+  });
+
+  it('rejects a tag whose slug collides with an untagged channel accessor', async () => {
+    const parser = new Parser();
+    const { document } = await parser.parse(`
+asyncapi: '3.1.0'
+info: { title: t, version: '1.0.0' }
+channels:
+  status:
+    address: status
+    messages:
+      A: { $ref: '#/components/messages/A' }
+  ping:
+    address: ping
+    tags:
+      - name: Status
+    messages:
+      B: { $ref: '#/components/messages/B' }
+components:
+  messages:
+    A:
+      name: A
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message A { int32 x = 1; }
+    B:
+      name: B
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message B { int32 y = 1; }
+`);
+    expect(() => buildFiles(document, { lang: 'cpp', projectName: 'demo_bus' })).toThrow(
+      /Tag group "status" collides with untagged channel "status"/
+    );
   });
 
   it('names the CMake project after projectName and wires up protobuf + mosquitto', () => {

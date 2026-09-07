@@ -60,29 +60,52 @@ describe('python buildProject (via src/build.js)', () => {
     expect(byPath['proto/demo_bus/commands.proto']).toContain('message ResetCommand {}');
   });
 
-  it('snake_cases channel ids into Channel attribute names, keeping the original address', () => {
+  it('exposes an untagged channel as a top-level snake_cased Channel attribute, keeping the original address', () => {
     const clientPy = byPath['src/demo_bus/client.py'];
-    expect(clientPy).toContain('self.motor_command: Channel[control_pb2.MotorCommand] = Channel(');
-    expect(clientPy).toContain('"motor/command", control_pb2.MotorCommand');
-    expect(clientPy).toContain('self.motor_echo: Channel[control_pb2.MotorCommand] = Channel(');
-    expect(clientPy).toContain('"motor/echo", control_pb2.MotorCommand');
-    expect(clientPy).toContain('self.motor_mode: Channel[control_pb2.MotorModeCmd] = Channel(');
-    expect(clientPy).toContain('self.device_heartbeat: Channel[telemetry_pb2.Heartbeat] = Channel(');
+    expect(clientPy).toContain('self.reset_command: Channel[commands_pb2.ResetCommand] = Channel(');
+    expect(clientPy).toContain('"device/reset", commands_pb2.ResetCommand');
     expect(clientPy).toContain('from demo_bus import control_pb2');
     expect(clientPy).toContain('from demo_bus import telemetry_pb2');
+  });
+
+  it('nests a tagged channel under a slugified-tag SimpleNamespace (message_bus.<tag>.<channel>)', () => {
+    const clientPy = byPath['src/demo_bus/client.py'];
+    expect(clientPy).toContain('from types import SimpleNamespace');
+    expect(clientPy).toContain('self.motor = SimpleNamespace(');
+    expect(clientPy).toContain('motor_command=Channel(');
+    expect(clientPy).toContain('"motor/command", control_pb2.MotorCommand');
+    expect(clientPy).toContain('motor_mode=Channel(');
+    // tag "Device Telemetry" -> slugified attribute name
+    expect(clientPy).toContain('self.device_telemetry = SimpleNamespace(');
+    expect(clientPy).toContain('device_heartbeat=Channel(');
+  });
+
+  it('places a channel with several tags under every one of its groups', () => {
+    const clientPy = byPath['src/demo_bus/client.py'];
+    expect(clientPy).toMatch(/self\.diagnostics = SimpleNamespace\([\s\S]*?motor_echo=Channel\([\s\S]*?"motor\/echo"/);
+    expect(clientPy).toMatch(/self\.motor = SimpleNamespace\([\s\S]*?motor_echo=Channel\([\s\S]*?"motor\/echo"/);
   });
 
   it('__init__.py re-exports MessageBus and MqttConfig', () => {
     expect(byPath['src/demo_bus/__init__.py']).toContain('from demo_bus.client import MessageBus, MqttConfig');
   });
 
-  it('generates a publish/subscribe/address pytest function per channel', () => {
+  it('generates a publish/subscribe/address pytest function per channel, through its accessor path', () => {
     const testPy = byPath['tests/test_client.py'];
-    for (const attr of ['device_heartbeat', 'motor_command', 'motor_mode', 'motor_echo', 'device_imu', 'reset_command']) {
-      expect(testPy).toContain(`def test_${attr}_address`);
-      expect(testPy).toContain(`def test_${attr}_publish_sends_a_protobuf_encoded_message`);
-      expect(testPy).toContain(`def test_${attr}_subscribe_dispatches_incoming_messages`);
-      expect(testPy).toContain(`bus.${attr}.address`);
+    const cases = [
+      ['reset_command', 'bus.reset_command'],
+      ['device_telemetry__device_heartbeat', 'bus.device_telemetry.device_heartbeat'],
+      ['device_telemetry__device_imu', 'bus.device_telemetry.device_imu'],
+      ['motor__motor_command', 'bus.motor.motor_command'],
+      ['motor__motor_mode', 'bus.motor.motor_mode'],
+      ['motor__motor_echo', 'bus.motor.motor_echo'],
+      ['diagnostics__motor_echo', 'bus.diagnostics.motor_echo'],
+    ];
+    for (const [fn, accessor] of cases) {
+      expect(testPy).toContain(`def test_${fn}_address`);
+      expect(testPy).toContain(`def test_${fn}_publish_sends_a_protobuf_encoded_message`);
+      expect(testPy).toContain(`def test_${fn}_subscribe_dispatches_incoming_messages`);
+      expect(testPy).toContain(`${accessor}.address`);
     }
     expect(testPy).toContain('class FakeMqttTransport:');
   });
@@ -123,6 +146,46 @@ components:
 `);
     expect(() => buildFiles(document, { lang: 'python', projectName: 'demo_bus' })).toThrow(
       /both map to the Python attribute name/
+    );
+  });
+
+  it('rejects a tag whose slug collides with an untagged channel accessor', async () => {
+    const parser = new Parser();
+    const { document } = await parser.parse(`
+asyncapi: '3.1.0'
+info: { title: t, version: '1.0.0' }
+channels:
+  status:
+    address: status
+    messages:
+      A: { $ref: '#/components/messages/A' }
+  ping:
+    address: ping
+    tags:
+      - name: Status
+    messages:
+      B: { $ref: '#/components/messages/B' }
+components:
+  messages:
+    A:
+      name: A
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message A { int32 x = 1; }
+    B:
+      name: B
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message B { int32 y = 1; }
+`);
+    expect(() => buildFiles(document, { lang: 'python', projectName: 'demo_bus' })).toThrow(
+      /Tag group "status" collides with untagged channel "status"/
     );
   });
 

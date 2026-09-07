@@ -1,5 +1,7 @@
 'use strict';
 
+const { groupChannels } = require('../../channel-groups');
+
 // A conservative, ASCII-only check (same rules as the js/python backends' identifier
 // validation). TS identifiers technically also allow `$`/unicode, but every real AsyncAPI
 // channel id in practice is already camelCase ASCII, and this keeps generated code as plain
@@ -46,32 +48,52 @@ function channelViewModels(channels) {
 function buildClientFiles(model, ctx) {
   const { projectName } = ctx;
   const channels = channelViewModels(model.channels);
+  const { flat, groups } = groupChannels(channels);
 
-  const fieldDecls = channels
-    .map((c) => {
-      const doc = c.description ? `  /** ${c.description.trim().split('\n')[0]} */\n` : '';
-      return `${doc}  readonly ${c.id}: Channel<${c.typeRef}>;`;
-    })
-    .join('\n');
+  const fieldDoc = (c, indent) =>
+    c.description ? `${indent}/** ${c.description.trim().split('\n')[0]} */\n` : '';
 
-  const channelAssignments = channels
-    .map(
-      (c) =>
-        `    this.${c.id} = new Channel(\n` +
-        `      "${c.address}",\n` +
-        `      ${c.valueRef} as unknown as ProtoCodec<${c.typeRef}>,\n` +
-        `      this._transport,\n` +
-        `      this._dispatch,\n` +
-        `    );`
-    )
-    .join('\n');
+  const fieldDecls = [
+    ...flat.map((c) => `${fieldDoc(c, '  ')}  readonly ${c.id}: Channel<${c.typeRef}>;`),
+    ...groups.map((g) => {
+      const members = g.channels
+        .map((c) => `${fieldDoc(c, '    ')}    readonly ${c.id}: Channel<${c.typeRef}>;`)
+        .join('\n');
+      return `  /** tag: ${g.tags.join(', ')} */\n  readonly ${g.name}: {\n${members}\n  };`;
+    }),
+  ].join('\n');
 
-  const exampleId = channels[0] ? channels[0].id : 'someChannel';
+  // `new Channel(...)` expression; `indent` is the leading whitespace of the `new Channel(` line.
+  const channelExpr = (c, indent) =>
+    `new Channel(\n` +
+    `${indent}  "${c.address}",\n` +
+    `${indent}  ${c.valueRef} as unknown as ProtoCodec<${c.typeRef}>,\n` +
+    `${indent}  this._transport,\n` +
+    `${indent}  this._dispatch,\n` +
+    `${indent})`;
+
+  const channelAssignments = [
+    ...flat.map((c) => `    this.${c.id} = ${channelExpr(c, '    ')};`),
+    ...groups.map((g) => {
+      const members = g.channels
+        .map((c) => `      ${c.id}: ${channelExpr(c, '      ')},`)
+        .join('\n');
+      return `    this.${g.name} = {\n${members}\n    };`;
+    }),
+  ].join('\n');
+
+  const exampleId = groups[0]
+    ? `${groups[0].name}.${groups[0].channels[0].id}`
+    : flat[0]
+      ? flat[0].id
+      : 'someChannel';
 
   const clientTs = `/**
  * Generated MQTT message-bus client for ${projectName}. Do not edit by hand.
  *
- * Every channel from the spec is exposed as a typed \`Channel\` property on \`MessageBus\`:
+ * Each spec channel is exposed as a typed \`Channel\` on \`MessageBus\`. A channel that carries
+ * AsyncAPI tags is nested under each tag (slugified): \`messageBus.<tag>.<channel>\`; a channel
+ * with no tags stays top-level: \`messageBus.<channel>\`.
  *
  *   messageBus.${exampleId}.subscribe((msg) => handle(msg));
  *   messageBus.${exampleId}.publish(msg);

@@ -5,6 +5,7 @@ const fs = require('fs');
 const { Parser } = require('@asyncapi/parser');
 const { parseAsyncApiDocument } = require('../src/model');
 const { extractProtoDeclarations } = require('../src/proto-extract');
+const { groupChannels } = require('../src/channel-groups');
 
 async function parseFixture(name) {
   const parser = new Parser();
@@ -77,6 +78,15 @@ describe('parseAsyncApiDocument', () => {
       'MotorModeCmd',
     ]);
     expect(model.protoPackages.size).toBe(4); // fleet.control, fleet.telemetry, fleet.sensors, fleet.commands
+  });
+
+  it('carries each channel\'s AsyncAPI tag names on the IR (empty array when none)', async () => {
+    const doc = await parseFixture('fleet-sample.yaml');
+    const byId = Object.fromEntries(parseAsyncApiDocument(doc).channels.map((c) => [c.id, c]));
+
+    expect(byId.deviceHeartbeat.tags).toEqual(['Device Telemetry']);
+    expect(byId.motorEcho.tags).toEqual(['motor', 'diagnostics']);
+    expect(byId.resetCommand.tags).toEqual([]);
   });
 
   it('rejects channels with more than one message', async () => {
@@ -153,5 +163,53 @@ components:
           x: { type: string }
 `);
     expect(() => parseAsyncApiDocument(document)).toThrow(/no inline proto payload/);
+  });
+});
+
+describe('groupChannels', () => {
+  const ch = (id, tags) => ({ id, tags });
+
+  it('keeps untagged channels flat, in spec order, with no groups', () => {
+    const { flat, groups } = groupChannels([ch('a', []), ch('b', [])]);
+    expect(flat.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(groups).toEqual([]);
+  });
+
+  it('slugifies tag names and sorts groups by the slugified name', () => {
+    const { flat, groups } = groupChannels([ch('heartbeat', ['Device Telemetry']), ch('cmd', ['motor'])]);
+    expect(flat).toEqual([]);
+    expect(groups.map((g) => g.name)).toEqual(['device_telemetry', 'motor']);
+    expect(groups[0].channels.map((c) => c.id)).toEqual(['heartbeat']);
+  });
+
+  it('puts a channel with several tags under every one of its groups', () => {
+    const { groups } = groupChannels([ch('echo', ['motor', 'diagnostics'])]);
+    expect(groups.map((g) => g.name)).toEqual(['diagnostics', 'motor']);
+    expect(groups.every((g) => g.channels[0].id === 'echo')).toBe(true);
+  });
+
+  it('merges tag strings that slugify to the same name into one group', () => {
+    const { groups } = groupChannels([ch('a', ['Motor Control']), ch('b', ['motor-control'])]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].name).toBe('motor_control');
+    expect(groups[0].channels.map((c) => c.id)).toEqual(['a', 'b']);
+  });
+
+  it('honours a custom keyOf when deduplicating group members', () => {
+    const { groups } = groupChannels(
+      [{ id: 'x', attr: 'shared', tags: ['g'] }, { id: 'y', attr: 'shared', tags: ['g'] }],
+      (c) => c.attr
+    );
+    expect(groups[0].channels.map((c) => c.id)).toEqual(['x']);
+  });
+
+  it('throws when a slugified tag collides with an untagged channel accessor', () => {
+    expect(() => groupChannels([ch('status', []), ch('ping', ['Status'])])).toThrow(
+      /Tag group "status" collides with untagged channel "status"/
+    );
+  });
+
+  it('throws when a tag cannot be slugified into a valid identifier', () => {
+    expect(() => groupChannels([ch('a', ['123'])])).toThrow(/not a valid identifier/);
   });
 });

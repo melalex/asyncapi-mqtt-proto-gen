@@ -1,6 +1,7 @@
 'use strict';
 
 const { channelViewModels } = require('./client');
+const { groupChannels } = require('../../channel-groups');
 
 /**
  * Emits pyproject.toml, Makefile, .gitignore and README.md for the generated project.
@@ -96,12 +97,17 @@ build/
 function readme(model, ctx) {
   const { projectName, specTitle } = ctx;
   const channels = channelViewModels(model.channels);
-  const example = channels[0];
+  const { flat, groups } = groupChannels(channels, (c) => c.attrName);
+  const example = groups[0] ? groups[0].channels[0] : flat[0];
   const protoFiles = [...model.protoPackages.keys()]
     .map((pkg) => `proto/${projectName}/${pkg.split('.').pop()}.proto`)
     .sort();
 
-  const exampleAttr = example ? example.attrName : 'some_channel';
+  const exampleAttr = groups[0]
+    ? `${groups[0].name}.${groups[0].channels[0].attrName}`
+    : example
+      ? example.attrName
+      : 'some_channel';
   const exampleType = example ? example.typeRef : 'YourMessageType';
   const exampleAddress = example ? example.address : 'your/topic';
 
@@ -110,7 +116,9 @@ function readme(model, ctx) {
 Python MQTT client generated from **${specTitle}** by [asyncapi-mqtt-proto-gen](https://github.com/melalex/asyncapi-mqtt-proto-gen) \\
 (\`asyncapi generate fromTemplate <spec>.yaml <this-generator> -p lang=python -p projectName=${projectName}\`).
 
-Every channel in the spec becomes a typed attribute of \`${projectName}.MessageBus\`:
+Every channel in the spec becomes a typed \`Channel\` on \`${projectName}.MessageBus\`. A channel that
+carries AsyncAPI tags is nested under each tag (slugified) — \`message_bus.<tag>.<channel>\`; a
+channel with no tags stays top-level — \`message_bus.<channel>\`. Multi-tag channels appear under each.
 
 \`\`\`python
 from ${projectName} import MessageBus, MqttConfig

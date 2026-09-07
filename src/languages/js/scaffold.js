@@ -2,6 +2,7 @@
 
 const { toPascalCase } = require('../../naming');
 const { channelViewModels } = require('./client');
+const { groupChannels } = require('../../channel-groups');
 
 /**
  * Emits package.json, vite.config.js, .gitignore and README.md for the generated project.
@@ -88,11 +89,16 @@ src/generated/
 function readme(model, ctx, distName) {
   const { specTitle } = ctx;
   const channels = channelViewModels(model.channels);
-  const example = channels[0];
+  const { flat, groups } = groupChannels(channels);
+  const example = groups[0] ? groups[0].channels[0] : flat[0];
   const protoFiles = [...model.protoPackages.keys()].map((pkg) => `proto/${pkg.split('.').pop()}.proto`).sort();
   const globalName = toPascalCase(distName);
 
-  const exampleId = example ? example.id : 'someChannel';
+  const examplePath = groups[0]
+    ? `${groups[0].name}.${groups[0].channels[0].id}`
+    : example
+      ? example.id
+      : 'someChannel';
   const exampleType = example ? example.typeRef : 'messages.some.pkg.YourMessageType';
   const exampleAddress = example ? example.address : 'your/topic';
 
@@ -101,7 +107,9 @@ function readme(model, ctx, distName) {
 JavaScript MQTT client generated from **${specTitle}** by [asyncapi-mqtt-proto-gen](https://github.com/melalex/asyncapi-mqtt-proto-gen) \\
 (\`asyncapi generate fromTemplate <spec>.yaml <this-generator> -p lang=js -p projectName=${ctx.projectName}\`).
 
-Every channel in the spec becomes a typed property of \`MessageBus\`:
+Every channel in the spec becomes a typed \`Channel\` on \`MessageBus\`. A channel that carries
+AsyncAPI tags is nested under each tag (slugified) — \`messageBus.<tag>.<channel>\`; a channel with
+no tags stays top-level — \`messageBus.<channel>\`. A channel with several tags appears under each.
 
 \`\`\`js
 import { MessageBus, messages } from "${distName}";
@@ -109,13 +117,13 @@ import { MessageBus, messages } from "${distName}";
 const messageBus = new MessageBus({ url: "ws://localhost:9001" });
 messageBus.connect();
 
-messageBus.${exampleId}.subscribe((msg) => {
+messageBus.${examplePath}.subscribe((msg) => {
   // handle(msg);
 });
 
-messageBus.${exampleId}.publish(${exampleType}.create({}));
+messageBus.${examplePath}.publish(${exampleType}.create({}));
 
-messageBus.${exampleId}.address; // "${exampleAddress}"
+messageBus.${examplePath}.address; // "${exampleAddress}"
 \`\`\`
 
 \`publish\`/\`subscribe\` always use protobuf binary encoding (\`Type.encode(...).finish()\` /
