@@ -9,6 +9,7 @@ const LANGUAGES = {
   cpp: require('./languages/cpp'),
   python: require('./languages/python'),
   js: require('./languages/js'),
+  ts: require('./languages/ts'),
 };
 
 /**

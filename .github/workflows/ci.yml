@@ -96,3 +96,29 @@ jobs:
           npm install
           npm run build
           npm test
+
+  build-generated-ts-project:
+    name: Build & test the generated TS project
+    runs-on: ubuntu-latest
+    needs: generator-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      - name: Generate a sample project from the fixture spec
+        run: |
+          npx asyncapi generate fromTemplate test/fixtures/fleet-sample.yaml . \
+            -p lang=ts -p projectName=demo_bus \
+            -o /tmp/generated-demo-bus-ts --force-write
+
+      - name: Install, build (buf/ts-proto + vite), typecheck and test the generated project
+        working-directory: /tmp/generated-demo-bus-ts
+        run: |
+          npm install
+          npm run build
+          npm run typecheck
+          npm test

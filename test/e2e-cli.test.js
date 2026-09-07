@@ -118,6 +118,38 @@ describe('end-to-end: asyncapi generate fromTemplate', () => {
     });
   });
 
+  describe('-p lang=ts', () => {
+    let outDir;
+
+    beforeAll(() => {
+      outDir = tmpOutDir('ts');
+      generate('ts', outDir);
+    });
+
+    it('writes the full project tree to disk, matching what buildFiles computed', () => {
+      const expected = [
+        '.gitignore',
+        'README.md',
+        'buf.gen.yaml',
+        'buf.yaml',
+        'package.json',
+        'tsconfig.json',
+        'vite.config.ts',
+        'proto/commands.proto',
+        'proto/control.proto',
+        'proto/sensors.proto',
+        'proto/telemetry.proto',
+        'src/client.ts',
+        'src/index.ts',
+        'src/messages.ts',
+        'tests/client.test.ts',
+      ];
+      for (const relPath of expected) {
+        expect(fs.existsSync(path.join(outDir, relPath))).toBe(true);
+      }
+    });
+  });
+
   it('rejects an unsupported lang with a clear CLI error', () => {
     expect(() => generate('rust', tmpOutDir('bad'))).toThrow();
   });

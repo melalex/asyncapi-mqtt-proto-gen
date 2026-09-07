@@ -21,7 +21,7 @@
     "supportedProtocols": ["mqtt"],
     "parameters": {
       "lang": {
-        "description": "Target language for the generated client. Supported values: cpp, python, js.",
+        "description": "Target language for the generated client. Supported values: cpp, python, js, ts.",
         "required": true
       },
       "projectName": {
@@ -35,7 +35,8 @@
     "test:e2e": "jest test/e2e-cli.test.js",
     "generate:example": "asyncapi generate fromTemplate test/fixtures/fleet-sample.yaml . -p lang=cpp -p projectName=demo_bus -o /tmp/asyncapi-mqtt-proto-gen-example --force-write",
     "generate:example:python": "asyncapi generate fromTemplate test/fixtures/fleet-sample.yaml . -p lang=python -p projectName=demo_bus -o /tmp/asyncapi-mqtt-proto-gen-example-py --force-write",
-    "generate:example:js": "asyncapi generate fromTemplate test/fixtures/fleet-sample.yaml . -p lang=js -p projectName=demo_bus -o /tmp/asyncapi-mqtt-proto-gen-example-js --force-write"
+    "generate:example:js": "asyncapi generate fromTemplate test/fixtures/fleet-sample.yaml . -p lang=js -p projectName=demo_bus -o /tmp/asyncapi-mqtt-proto-gen-example-js --force-write",
+    "generate:example:ts": "asyncapi generate fromTemplate test/fixtures/fleet-sample.yaml . -p lang=ts -p projectName=demo_bus -o /tmp/asyncapi-mqtt-proto-gen-example-ts --force-write"
   },
   "dependencies": {
     "@asyncapi/generator-react-sdk": "^1.1.3"
