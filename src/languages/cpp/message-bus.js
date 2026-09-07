@@ -1,6 +1,10 @@
 'use strict';
 
-const { assertValidCppIdentifier } = require('../../naming');
+const { assertValidCppIdentifier, toPascalCase } = require('../../naming');
+const { groupChannels } = require('../../channel-groups');
+
+const DISPATCH_TYPE =
+  'std::unordered_map<std::string, std::function<void(const std::string&)>>';
 
 function protoNamespace(protoPackage) {
   return protoPackage.split('.').join('::');
@@ -31,13 +35,44 @@ function buildMessageBusFiles(model, ctx) {
     .map((stem) => `#include "${stem}.pb.h"`)
     .join('\n');
 
-  const channelMembers = channels
+  const { flat, groups } = groupChannels(channels);
+  const typeOf = (c) => `${protoNamespace(c.protoPackage)}::${c.protoMessageType}`;
+
+  // A channel with no tags is a plain `Channel<T>` data member. A channel that carries tags lives
+  // inside one nested struct per tag (`messageBus.<tag>.<channel>`); the struct needs an explicit
+  // constructor because a nested class's default member initializers can't name the enclosing
+  // MessageBus's `transport_` / `dispatch_`.
+  const flatMembers = flat
     .map((c) => {
-      const type = `${protoNamespace(c.protoPackage)}::${c.protoMessageType}`;
       const doc = c.description ? `  // ${c.description.trim().split('\n')[0]}\n` : '';
-      return `${doc}  Channel<${type}> ${c.id}{"${c.address}", *transport_, dispatch_};`;
+      return `${doc}  Channel<${typeOf(c)}> ${c.id}{"${c.address}", *transport_, dispatch_};`;
     })
     .join('\n');
+
+  const groupMembers = groups
+    .map((g) => {
+      const structName = `${toPascalCase(g.name)}Group`;
+      const ctorInits = g.channels
+        .map((c) => `${c.id}("${c.address}", transport, dispatch)`)
+        .join(',\n          ');
+      const fields = g.channels
+        .map((c) => {
+          const doc = c.description ? `    // ${c.description.trim().split('\n')[0]}\n` : '';
+          return `${doc}    Channel<${typeOf(c)}> ${c.id};`;
+        })
+        .join('\n');
+      return (
+        `  // tag: ${g.tags.join(', ')}\n` +
+        `  struct ${structName} {\n` +
+        `    ${structName}(IMqttTransport& transport, ${DISPATCH_TYPE}& dispatch)\n` +
+        `        : ${ctorInits} {}\n` +
+        `${fields}\n` +
+        `  } ${g.name}{*transport_, dispatch_};`
+      );
+    })
+    .join('\n');
+
+  const channelMembers = [flatMembers, groupMembers].filter(Boolean).join('\n');
 
   const files = [];
 
@@ -157,11 +192,13 @@ ${protoIncludes}
 
 namespace ${projectName} {
 
-// One MQTT channel, typed to its proto message. Every channel generated from the AsyncAPI spec
-// gets exactly this shape:
+// One MQTT channel, typed to its proto message. A channel with no AsyncAPI tags is a direct
+// member of MessageBus; a channel that carries tags is nested under one struct per tag
+// (slugified) -- messageBus.<tag>.<channel>. Either way it has exactly this shape:
 //
-//   messageBus.someChannel.publish(msg);
-//   messageBus.someChannel.subscribe([](const SomeMessage& msg) { ... });
+//   messageBus.someChannel.publish(msg);                 // untagged channel
+//   messageBus.someGroup.someChannel.subscribe(          // tagged channel
+//       [](const SomeMessage& msg) { ... });
 //   messageBus.someChannel.address;  // e.g. "some/topic"
 //
 // Publish/subscribe always use protobuf binary encoding (SerializeToString/ParseFromString).

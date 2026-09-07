@@ -8,8 +8,10 @@ An [AsyncAPI Generator](https://www.asyncapi.com/docs/tools/generator) template.
 AsyncAPI v3 spec whose message payloads are **inline proto3 schemas**
 (`schemaFormat: application/vnd.google.protobuf;version=3`), it emits a ready-to-build client
 project — one `.proto` file per proto package plus a typed client where every channel exposes the
-same tiny API (`messageBus.<channel>.publish/subscribe/address`) — in C++, Python, JavaScript, or
-TypeScript.
+same tiny API — in C++, Python, JavaScript, or TypeScript. A channel with no AsyncAPI tags is
+reached as `messageBus.<channel>.publish/subscribe/address`; a channel that carries `tags` is
+nested under each tag (slugified): `messageBus.<tag>.<channel>.publish/subscribe/address`, and a
+multi-tag channel appears under every one of its groups.
 
 Invoked as:
 ```sh
@@ -64,13 +66,17 @@ template/index.js ┘   (LANGUAGES map)   src/languages/<lang>/index.js        (
 - **`src/build.js`** — the extension seam. `LANGUAGES` maps `lang` → `src/languages/<lang>/index.js`,
   each exporting `buildProject(model, params, { specTitle, defaultProjectName }) -> {path, content}[]`.
 - **`src/model.js` + `src/proto-extract.js`** — parse every channel's embedded proto3 text into the
-  shared IR: `{ channels: [{id, address, protoPackage, protoMessageType, ...}],
-  protoPackages: Map<pkg, Map<declName, decl>> }`. Declarations referenced by multiple channels are
-  deduplicated; conflicting bodies for the same name throw.
+  shared IR: `{ channels: [{id, address, tags, protoPackage, protoMessageType, ...}],
+  protoPackages: Map<pkg, Map<declName, decl>> }`. `tags` is the channel's AsyncAPI tag names (a
+  possibly-empty array). Declarations referenced by multiple channels are deduplicated; conflicting
+  bodies for the same name throw.
 - **`src/proto-emit.js`** — shared "one `.proto` file per package" text renderer, used by all four
   backends. Only the output-path prefix differs (see Python note below).
+- **`src/channel-groups.js`** — shared `groupChannels(channels, keyOf)` → `{ flat, groups }`,
+  used by every backend to render the tag-grouped client API (see the tag-grouping convention
+  below). Slugifies tag names, merges same-slug tags, throws on a group/flat-channel name clash.
 - **`src/naming.js`** — string-case helpers (`slugify`, `toSnakeCase`, `toPascalCase`,
-  `toUpperSnake`, identifier validators).
+  `toUpperSnake`, identifier validators including the language-agnostic `assertValidIdentifier`).
 
 Each `src/languages/<lang>/` follows the same layout: `index.js` (composes the others) + `proto.js`
 + `scaffold.js` (build files, README, .gitignore) + `tests.js` + a client module
@@ -95,6 +101,14 @@ Implement `src/languages/<lang>/index.js` with the `buildProject` signature abov
 - **Each backend ships a transport abstraction + an in-memory `FakeMqttTransport`** so generated
   tests need no broker. Real transports: libmosquitto (cpp), paho-mqtt (python), MQTT.js over
   WebSocket (js/ts — browsers can't do raw TCP MQTT).
+- **Tag grouping (all four backends, via `src/channel-groups.js`):** an untagged channel stays a
+  top-level accessor (`messageBus.<channel>`); a tagged channel is nested under one group per tag,
+  named `slugify(tag)` — the **same** lower_snake_case name in every language — reached as
+  `messageBus.<tag>.<channel>`. A multi-tag channel is a member of each of its groups; two tags
+  that slugify to the same name merge; a group name that collides with an untagged channel's
+  accessor throws. Group container: nested struct-with-ctor (cpp, named `<Pascal>Group`), inline
+  object literal + inline object type (js/ts), `types.SimpleNamespace` (python). The topic→handler
+  dispatch table is unaffected — grouping is only an accessor path.
 - **`src/model.js` payload parsing handles both drivers:** the real `asyncapi` CLI registers a
   protobuf schema-parser plugin (original proto text lands in `x-parser-original-payload`); a bare
   `new Parser()` leaves it as `payload.schema`. Support both.
@@ -122,4 +136,7 @@ Implement `src/languages/<lang>/index.js` with the `buildProject` signature abov
 
 `test/fixtures/fleet-sample.yaml` — the generic spec used by every test and `generate:example`
 script. Deliberately scrubbed of any tie to the private project this generator was modeled on;
-keep new test naming in the same generic style.
+keep new test naming in the same generic style. It tags several channels to exercise grouping end
+to end: `motorCommand`/`motorMode` → `motor`, `motorEcho` → `motor` **and** `diagnostics`
+(multi-tag), `deviceHeartbeat`/`deviceImu` → `Device Telemetry` (slugifies to `device_telemetry`),
+and `resetCommand` stays untagged/flat.

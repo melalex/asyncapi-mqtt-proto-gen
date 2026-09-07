@@ -19,36 +19,50 @@ defaultContentType: application/json
 channels:
   deviceHeartbeat:
     address: 'device/heartbeat'
+    # Tag name with a space/capitals to exercise slugify -> messageBus.device_telemetry.*
+    tags:
+      - name: Device Telemetry
     messages:
       Heartbeat:
         $ref: '#/components/messages/Heartbeat'
 
   motorCommand:
     address: 'motor/command'
+    tags:
+      - name: motor
     messages:
       MotorCommand:
         $ref: '#/components/messages/MotorCommand'
 
   motorMode:
     address: 'motor/mode'
+    tags:
+      - name: motor
     messages:
       MotorModeCmd:
         $ref: '#/components/messages/MotorModeCmd'
 
   motorEcho:
     address: 'motor/echo'
+    # Multiple tags: this channel appears under both messageBus.motor.* and messageBus.diagnostics.*
+    tags:
+      - name: motor
+      - name: diagnostics
     messages:
       MotorCommand:
         $ref: '#/components/messages/MotorCommand'
 
   deviceImu:
     address: 'device/imu'
+    tags:
+      - name: Device Telemetry
     messages:
       ImuSample:
         $ref: '#/components/messages/ImuSample'
 
   resetCommand:
     address: 'device/reset'
+    # No tags: stays flat at messageBus.resetCommand.*
     messages:
       ResetCommand:
         $ref: '#/components/messages/ResetCommand'

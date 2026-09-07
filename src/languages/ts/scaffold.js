@@ -2,6 +2,7 @@
 
 const { toPascalCase } = require('../../naming');
 const { channelViewModels, protoModules } = require('./client');
+const { groupChannels } = require('../../channel-groups');
 
 /**
  * Emits package.json, tsconfig.json, buf.yaml, buf.gen.yaml, vite.config.ts, .gitignore and
@@ -140,11 +141,16 @@ src/generated/
 function readme(model, ctx, distName) {
   const { specTitle } = ctx;
   const channels = channelViewModels(model.channels);
-  const example = channels[0];
+  const { flat, groups } = groupChannels(channels);
+  const example = groups[0] ? groups[0].channels[0] : flat[0];
   const protoFiles = [...model.protoPackages.keys()].map((pkg) => `proto/${pkg.split('.').pop()}.proto`).sort();
   const globalName = toPascalCase(distName);
 
-  const exampleId = example ? example.id : 'someChannel';
+  const exampleId = groups[0]
+    ? `${groups[0].name}.${groups[0].channels[0].id}`
+    : example
+      ? example.id
+      : 'someChannel';
   const exampleType = example ? example.valueRef : 'messages.somePkg.YourMessageType';
   const exampleAddress = example ? example.address : 'your/topic';
   const exampleModules = protoModules(model).join(', ') || 'somePkg';
@@ -154,7 +160,9 @@ function readme(model, ctx, distName) {
 TypeScript MQTT client generated from **${specTitle}** by [asyncapi-mqtt-proto-gen](https://github.com/melalex/asyncapi-mqtt-proto-gen) \\
 (\`asyncapi generate fromTemplate <spec>.yaml <this-generator> -p lang=ts -p projectName=${ctx.projectName}\`).
 
-Every channel in the spec becomes a typed property of \`MessageBus\`:
+Every channel in the spec becomes a typed \`Channel\` on \`MessageBus\`. A channel that carries
+AsyncAPI tags is nested under each tag (slugified) — \`messageBus.<tag>.<channel>\`; a channel with
+no tags stays top-level — \`messageBus.<channel>\`. A channel with several tags appears under each.
 
 \`\`\`ts
 import { MessageBus, messages } from "${distName}";

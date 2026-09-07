@@ -1,6 +1,7 @@
 'use strict';
 
 const { toSnakeCase, assertValidPythonIdentifier } = require('../../naming');
+const { groupChannels } = require('../../channel-groups');
 
 function protoModuleStem(protoPackage) {
   return protoPackage.split('.').pop();
@@ -42,30 +43,54 @@ function channelViewModels(channels) {
 function buildClientFiles(model, ctx) {
   const { projectName } = ctx;
   const channels = channelViewModels(model.channels);
+  const { flat, groups } = groupChannels(channels, (c) => c.attrName);
 
   const imports = [...new Set(channels.map((c) => c.moduleAlias))]
     .sort()
     .map((alias) => `from ${projectName} import ${alias}`)
     .join('\n');
 
-  const channelAttrs = channels
+  // A tagged channel is reached as message_bus.<tag>.<channel>; the group is a SimpleNamespace
+  // holding one Channel per member. `indent` is the leading whitespace of the `Channel(` line.
+  const channelExpr = (c, indent) =>
+    `Channel(\n${indent}    "${c.address}", ${c.typeRef}, self._transport, self._dispatch\n${indent})`;
+
+  const flatAttrs = flat
     .map((c) => {
       const doc = c.description ? `        # ${c.description.trim().split('\n')[0]}\n` : '';
-      return (
-        `${doc}        self.${c.attrName}: Channel[${c.typeRef}] = Channel(\n` +
-        `            "${c.address}", ${c.typeRef}, self._transport, self._dispatch\n` +
-        `        )`
-      );
+      return `${doc}        self.${c.attrName}: Channel[${c.typeRef}] = ${channelExpr(c, '        ')}`;
     })
     .join('\n');
 
+  const groupAttrs = groups
+    .map((g) => {
+      const members = g.channels
+        .map((c) => {
+          const doc = c.description ? `            # ${c.description.trim().split('\n')[0]}\n` : '';
+          return `${doc}            ${c.attrName}=${channelExpr(c, '            ')},`;
+        })
+        .join('\n');
+      return `        # tag: ${g.tags.join(', ')}\n        self.${g.name} = SimpleNamespace(\n${members}\n        )`;
+    })
+    .join('\n');
+
+  const channelAttrs = [flatAttrs, groupAttrs].filter(Boolean).join('\n');
+  const simpleNamespaceImport = groups.length ? '\nfrom types import SimpleNamespace' : '';
+  const examplePath = groups[0]
+    ? `${groups[0].name}.${groups[0].channels[0].attrName}`
+    : flat[0]
+      ? flat[0].attrName
+      : 'some_channel';
+
   const clientPy = `"""Generated MQTT message-bus client for ${projectName}. Do not edit by hand.
 
-Every channel from the spec is exposed as a typed \`Channel\` attribute on \`MessageBus\`:
+Each spec channel is exposed as a typed \`Channel\` on \`MessageBus\`. A channel that carries
+AsyncAPI tags is nested under each tag (slugified): \`message_bus.<tag>.<channel>\`; a channel
+with no tags stays top-level: \`message_bus.<channel>\`.
 
-    message_bus.${channels[0] ? channels[0].attrName : 'some_channel'}.subscribe(lambda msg: handle(msg))
-    message_bus.${channels[0] ? channels[0].attrName : 'some_channel'}.publish(msg)
-    message_bus.${channels[0] ? channels[0].attrName : 'some_channel'}.address
+    message_bus.${examplePath}.subscribe(lambda msg: handle(msg))
+    message_bus.${examplePath}.publish(msg)
+    message_bus.${examplePath}.address
 
 publish()/subscribe() always use protobuf binary encoding (SerializeToString/ParseFromString).
 """
@@ -73,7 +98,7 @@ publish()/subscribe() always use protobuf binary encoding (SerializeToString/Par
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Generic, Optional, Protocol, TypeVar
+from typing import Callable, Generic, Optional, Protocol, TypeVar${simpleNamespaceImport}
 
 import paho.mqtt.client as mqtt
 

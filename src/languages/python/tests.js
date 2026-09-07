@@ -1,6 +1,7 @@
 'use strict';
 
 const { channelViewModels } = require('./client');
+const { groupChannels } = require('../../channel-groups');
 
 /**
  * Emits tests/test_client.py: an in-memory FakeMqttTransport plus a publish/subscribe/address
@@ -13,13 +14,17 @@ const { channelViewModels } = require('./client');
 function buildTestFiles(model, ctx) {
   const { projectName } = ctx;
   const channels = channelViewModels(model.channels);
+  const { flat, groups } = groupChannels(channels, (c) => c.attrName);
 
   const imports = [...new Set(channels.map((c) => c.moduleAlias))]
     .sort()
     .map((alias) => `from ${projectName} import ${alias}`)
     .join('\n');
 
-  const testFunctions = channels.map((c) => testFunctionsFor(projectName, c)).join('\n');
+  const testFunctions = [
+    ...flat.map((c) => testFunctionsFor(c)),
+    ...groups.flatMap((g) => g.channels.map((c) => testFunctionsFor(c, g.name))),
+  ].join('\n');
 
   const content = `"""Generated tests: one publish/subscribe/address check per channel, using the in-memory
 FakeMqttTransport so no real MQTT broker is needed."""
@@ -69,22 +74,24 @@ ${testFunctions}`;
   return [{ path: 'tests/test_client.py', content }];
 }
 
-function testFunctionsFor(projectName, channel) {
+function testFunctionsFor(channel, groupName) {
   const { attrName, typeRef, address } = channel;
+  const accessor = groupName ? `bus.${groupName}.${attrName}` : `bus.${attrName}`;
+  const fn = groupName ? `${groupName}__${attrName}` : attrName;
 
-  return `def test_${attrName}_address() -> None:
+  return `def test_${fn}_address() -> None:
     transport = FakeMqttTransport()
     bus = MessageBus(transport=transport)
 
-    assert bus.${attrName}.address == "${address}"
+    assert ${accessor}.address == "${address}"
 
 
-def test_${attrName}_publish_sends_a_protobuf_encoded_message() -> None:
+def test_${fn}_publish_sends_a_protobuf_encoded_message() -> None:
     transport = FakeMqttTransport()
     bus = MessageBus(transport=transport)
 
     message = ${typeRef}()
-    bus.${attrName}.publish(message)
+    ${accessor}.publish(message)
 
     assert len(transport.published) == 1
     topic, payload = transport.published[0]
@@ -94,12 +101,12 @@ def test_${attrName}_publish_sends_a_protobuf_encoded_message() -> None:
     round_tripped.ParseFromString(payload)  # doesn't raise
 
 
-def test_${attrName}_subscribe_dispatches_incoming_messages() -> None:
+def test_${fn}_subscribe_dispatches_incoming_messages() -> None:
     transport = FakeMqttTransport()
     bus = MessageBus(transport=transport)
 
     received: list[${typeRef}] = []
-    bus.${attrName}.subscribe(lambda msg: received.append(msg))
+    ${accessor}.subscribe(lambda msg: received.append(msg))
 
     assert transport.subscribed_topics == ["${address}"]
 

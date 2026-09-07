@@ -60,16 +60,29 @@ describe('js buildProject (via src/build.js)', () => {
     expect(byPath['proto/commands.proto']).toContain('message ResetCommand {}');
   });
 
-  it('declares one Channel property per channel, named exactly after the channel id (no case conversion)', () => {
+  it('exposes an untagged channel as a top-level Channel property, named exactly after the channel id', () => {
     const clientJs = byPath['src/client.js'];
-    expect(clientJs).toContain('this.motorCommand = new Channel(');
-    expect(clientJs).toContain('"motor/command", messages.fleet.control.MotorCommand');
-    expect(clientJs).toContain('this.motorEcho = new Channel(');
-    expect(clientJs).toContain('"motor/echo", messages.fleet.control.MotorCommand');
-    expect(clientJs).toContain('this.motorMode = new Channel(');
-    expect(clientJs).toContain('this.deviceHeartbeat = new Channel(');
-    expect(clientJs).toContain('messages.fleet.telemetry.Heartbeat');
+    expect(clientJs).toContain('this.resetCommand = new Channel(');
+    expect(clientJs).toContain('"device/reset", messages.fleet.commands.ResetCommand');
     expect(clientJs).toContain('import messages from "./generated/messages.js"');
+  });
+
+  it('nests a tagged channel under a slugified-tag object (messageBus.<tag>.<channel>)', () => {
+    const clientJs = byPath['src/client.js'];
+    expect(clientJs).toContain('this.motor = {');
+    expect(clientJs).toContain('motorCommand: new Channel(');
+    expect(clientJs).toContain('"motor/command", messages.fleet.control.MotorCommand');
+    expect(clientJs).toContain('motorMode: new Channel(');
+    // tag "Device Telemetry" -> slugified property name
+    expect(clientJs).toContain('this.device_telemetry = {');
+    expect(clientJs).toContain('deviceHeartbeat: new Channel(');
+    expect(clientJs).toContain('messages.fleet.telemetry.Heartbeat');
+  });
+
+  it('places a channel with several tags under every one of its groups', () => {
+    const clientJs = byPath['src/client.js'];
+    expect(clientJs).toMatch(/this\.diagnostics = \{[\s\S]*?motorEcho: new Channel\([\s\S]*?"motor\/echo"/);
+    expect(clientJs).toMatch(/this\.motor = \{[\s\S]*?motorEcho: new Channel\([\s\S]*?"motor\/echo"/);
   });
 
   it('index.js re-exports MessageBus and the generated messages namespace', () => {
@@ -78,13 +91,22 @@ describe('js buildProject (via src/build.js)', () => {
     expect(indexJs).toContain('export { default as messages } from "./generated/messages.js"');
   });
 
-  it('generates a publish/subscribe/address Vitest case per channel', () => {
+  it('generates a publish/subscribe/address Vitest case per channel, through its accessor path', () => {
     const testJs = byPath['tests/client.test.js'];
-    for (const id of ['deviceHeartbeat', 'motorCommand', 'motorMode', 'motorEcho', 'deviceImu', 'resetCommand']) {
-      expect(testJs).toContain(`describe("${id}", () => {`);
-      expect(testJs).toContain(`bus.${id}.address`);
-      expect(testJs).toContain(`bus.${id}.publish(`);
-      expect(testJs).toContain(`bus.${id}.subscribe(`);
+    const cases = [
+      ['resetCommand', 'bus.resetCommand'],
+      ['device_telemetry.deviceHeartbeat', 'bus.device_telemetry.deviceHeartbeat'],
+      ['device_telemetry.deviceImu', 'bus.device_telemetry.deviceImu'],
+      ['motor.motorCommand', 'bus.motor.motorCommand'],
+      ['motor.motorMode', 'bus.motor.motorMode'],
+      ['motor.motorEcho', 'bus.motor.motorEcho'],
+      ['diagnostics.motorEcho', 'bus.diagnostics.motorEcho'],
+    ];
+    for (const [label, accessor] of cases) {
+      expect(testJs).toContain(`describe("${label}", () => {`);
+      expect(testJs).toContain(`${accessor}.address`);
+      expect(testJs).toContain(`${accessor}.publish(`);
+      expect(testJs).toContain(`${accessor}.subscribe(`);
     }
     expect(testJs).toContain('class FakeMqttTransport');
   });
@@ -123,6 +145,46 @@ components:
 `);
     expect(() => buildFiles(document, { lang: 'js', projectName: 'demo_bus' })).toThrow(
       /not a valid JavaScript identifier/
+    );
+  });
+
+  it('rejects a tag whose slug collides with an untagged channel accessor', async () => {
+    const parser = new Parser();
+    const { document } = await parser.parse(`
+asyncapi: '3.1.0'
+info: { title: t, version: '1.0.0' }
+channels:
+  status:
+    address: status
+    messages:
+      A: { $ref: '#/components/messages/A' }
+  ping:
+    address: ping
+    tags:
+      - name: Status
+    messages:
+      B: { $ref: '#/components/messages/B' }
+components:
+  messages:
+    A:
+      name: A
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message A { int32 x = 1; }
+    B:
+      name: B
+      payload:
+        schemaFormat: 'application/vnd.google.protobuf;version=3'
+        schema: |
+          syntax = "proto3";
+          package p;
+          message B { int32 y = 1; }
+`);
+    expect(() => buildFiles(document, { lang: 'js', projectName: 'demo_bus' })).toThrow(
+      /Tag group "status" collides with untagged channel "status"/
     );
   });
 

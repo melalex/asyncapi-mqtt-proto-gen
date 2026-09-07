@@ -60,6 +60,18 @@ function toPascalCase(text) {
     .join('');
 }
 
+/**
+ * Language-agnostic identifier check (same rules as the C++/Python validators above), for names
+ * that must be legal in every backend at once — e.g. a slugified AsyncAPI tag used as the group
+ * accessor across all four languages. Throws if `name` can't be one; returns `name` otherwise.
+ */
+function assertValidIdentifier(name, context) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`${context}: "${name}" is not a valid identifier`);
+  }
+  return name;
+}
+
 module.exports = {
   slugify,
   toUpperSnake,
@@ -67,4 +79,5 @@ module.exports = {
   toPascalCase,
   assertValidCppIdentifier,
   assertValidPythonIdentifier,
+  assertValidIdentifier,
 };
