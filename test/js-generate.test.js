@@ -85,6 +85,27 @@ describe('js buildProject (via src/build.js)', () => {
     expect(clientJs).toMatch(/this\.motor = \{[\s\S]*?motorEcho: new Channel\([\s\S]*?"motor\/echo"/);
   });
 
+  it('threads the MQTT retain binding into the Channel ctor (channel- and operation-level)', () => {
+    const clientJs = byPath['src/client.js'];
+    // motorMode has a channel-level bindings.mqtt.retain; motorCommand inherits it from its send op.
+    expect(clientJs).toMatch(/"motor\/mode", messages\.fleet\.control\.MotorModeCmd, this\._transport, this\._dispatch, true/);
+    expect(clientJs).toMatch(/"motor\/command", messages\.fleet\.control\.MotorCommand, this\._transport, this\._dispatch, true/);
+    // Untagged, unbound channel: unchanged, no retain arg.
+    expect(clientJs).toMatch(/"device\/reset", messages\.fleet\.commands\.ResetCommand, this\._transport, this\._dispatch\n/);
+    // motorEcho shares the "motor" group but declares no retain of its own.
+    expect(clientJs).not.toMatch(/"motor\/echo"[^\n]*this\._dispatch, true/);
+    expect(clientJs).toContain('publish(topic, payload, retain = false)');
+    expect(clientJs).toContain('this._client.publish(topic, payload, { retain })');
+  });
+
+  it('records and asserts the retain flag in the generated FakeMqttTransport tests', () => {
+    const testJs = byPath['tests/client.test.js'];
+    expect(testJs).toContain('publish(topic, payload, retain = false)');
+    expect(testJs).toContain('this.published.push({ topic, payload, retain })');
+    expect(testJs).toMatch(/describe\("motor\.motorMode"[\s\S]*?published\[0\]\.retain\)\.toBe\(true\)/);
+    expect(testJs).toMatch(/describe\("resetCommand"[\s\S]*?published\[0\]\.retain\)\.toBe\(false\)/);
+  });
+
   it('index.js re-exports MessageBus and the generated messages namespace', () => {
     const indexJs = byPath['src/index.js'];
     expect(indexJs).toContain('export { MessageBus, Channel, MqttJsTransport } from "./client.js"');

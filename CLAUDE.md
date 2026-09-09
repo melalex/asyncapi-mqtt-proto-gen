@@ -11,7 +11,8 @@ project — one `.proto` file per proto package plus a typed client where every 
 same tiny API — in C++, Python, JavaScript, or TypeScript. A channel with no AsyncAPI tags is
 reached as `messageBus.<channel>.publish/subscribe/address`; a channel that carries `tags` is
 nested under each tag (slugified): `messageBus.<tag>.<channel>.publish/subscribe/address`, and a
-multi-tag channel appears under every one of its groups.
+multi-tag channel appears under every one of its groups. A channel whose MQTT binding — or the
+binding on its `send` operation — sets `retain: true` publishes MQTT retained messages.
 
 Invoked as:
 ```sh
@@ -98,6 +99,13 @@ Implement `src/languages/<lang>/index.js` with the `buildProject` signature abov
 - **Scope limits for every backend:** exactly one message per channel; `publish`/`subscribe` always
   use protobuf **binary** encoding — any legacy per-message wire-format in a spec is ignored, proto
   is canonical.
+- **MQTT `retain` (all four backends):** `src/model.js` resolves a per-channel `retain` boolean
+  onto the IR — `channels.<id>.bindings.mqtt.retain` if the channel declares it, otherwise the
+  `mqtt.retain` binding on a `send` operation targeting that channel (an explicit channel-level
+  value always wins; default `false`). Each backend's `Channel` gets a defaulted `retain` ctor arg
+  (emitted only when `true`, so non-retained output is byte-identical) and forwards it to a new
+  trailing `retain` param on `transport.publish` (mosquitto `retain` flag / paho `retain=` /
+  MQTT.js `{ retain }`). Publish-only — subscribers receive retained messages automatically.
 - **Each backend ships a transport abstraction + an in-memory `FakeMqttTransport`** so generated
   tests need no broker. Real transports: libmosquitto (cpp), paho-mqtt (python), MQTT.js over
   WebSocket (js/ts — browsers can't do raw TCP MQTT).
@@ -139,4 +147,6 @@ script. Deliberately scrubbed of any tie to the private project this generator w
 keep new test naming in the same generic style. It tags several channels to exercise grouping end
 to end: `motorCommand`/`motorMode` → `motor`, `motorEcho` → `motor` **and** `diagnostics`
 (multi-tag), `deviceHeartbeat`/`deviceImu` → `Device Telemetry` (slugifies to `device_telemetry`),
-and `resetCommand` stays untagged/flat.
+and `resetCommand` stays untagged/flat. It also exercises `retain` both ways: `motorMode` carries
+a channel-level `bindings.mqtt.retain: true`, and the `sendMotorCommand` operation carries an
+operation-level one that `motorCommand` (no channel binding) inherits.

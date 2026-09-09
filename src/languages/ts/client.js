@@ -64,12 +64,15 @@ function buildClientFiles(model, ctx) {
   ].join('\n');
 
   // `new Channel(...)` expression; `indent` is the leading whitespace of the `new Channel(` line.
+  // The trailing `retain` arg is only emitted for channels whose MQTT binding sets it, so
+  // non-retained output is byte-for-byte unchanged.
   const channelExpr = (c, indent) =>
     `new Channel(\n` +
     `${indent}  "${c.address}",\n` +
     `${indent}  ${c.valueRef} as unknown as ProtoCodec<${c.typeRef}>,\n` +
     `${indent}  this._transport,\n` +
     `${indent}  this._dispatch,\n` +
+    (c.retain ? `${indent}  true,\n` : '') +
     `${indent})`;
 
   const channelAssignments = [
@@ -111,7 +114,7 @@ import * as messages from "./messages.js";
 export interface MqttTransport {
   connect(): void;
   disconnect(): void;
-  publish(topic: string, payload: Uint8Array): void;
+  publish(topic: string, payload: Uint8Array, retain?: boolean): void;
   subscribe(topic: string): void;
   setMessageHandler(handler: (topic: string, payload: Uint8Array) => void): void;
 }
@@ -161,8 +164,8 @@ export class MqttJsTransport implements MqttTransport {
     if (this.client) this.client.end();
   }
 
-  publish(topic: string, payload: Uint8Array): void {
-    this.client?.publish(topic, Buffer.from(payload));
+  publish(topic: string, payload: Uint8Array, retain = false): void {
+    this.client?.publish(topic, Buffer.from(payload), { retain });
   }
 
   subscribe(topic: string): void {
@@ -181,10 +184,11 @@ export class Channel<T> {
     private readonly codec: ProtoCodec<T>,
     private readonly transport: MqttTransport,
     private readonly dispatch: Map<string, (payload: Uint8Array) => void>,
+    private readonly retain: boolean = false,
   ) {}
 
   publish(message: T): void {
-    this.transport.publish(this.address, this.codec.encode(message).finish());
+    this.transport.publish(this.address, this.codec.encode(message).finish(), this.retain);
   }
 
   subscribe(handler: (message: T) => void): void {

@@ -47,6 +47,7 @@ function testCasesFor(projectName, channel, groupName) {
   const label = groupName ? `${groupName}.${channel.id}` : channel.id;
   const tag = groupName ? `[${groupName}][${channel.id}]` : `[${channel.id}]`;
   const address = channel.address;
+  const retain = channel.retain ? 'true' : 'false';
 
   return `TEST_CASE("${label}.address matches the spec", "${tag}") {
   auto transport = std::make_unique<${projectName}::testing::FakeMqttTransport>();
@@ -65,6 +66,7 @@ TEST_CASE("${label}.publish sends a protobuf-encoded message to its topic", "${t
 
   REQUIRE(rawTransport->published.size() == 1);
   CHECK(rawTransport->published[0].topic == "${address}");
+  CHECK(rawTransport->published[0].retain == ${retain});
 
   ${type} roundTripped;
   CHECK(roundTripped.ParseFromString(rawTransport->published[0].payload));
@@ -110,13 +112,14 @@ class FakeMqttTransport : public ${projectName}::IMqttTransport {
   struct PublishedMessage {
     std::string topic;
     std::string payload;
+    bool retain;
   };
 
   void connect() override { connected_ = true; }
   void disconnect() override { connected_ = false; }
 
-  void publish(const std::string& topic, const std::string& payload) override {
-    published.push_back({topic, payload});
+  void publish(const std::string& topic, const std::string& payload, bool retain) override {
+    published.push_back({topic, payload, retain});
   }
 
   void subscribe(const std::string& topic) override { subscribedTopics.push_back(topic); }

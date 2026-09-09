@@ -86,6 +86,28 @@ describe('python buildProject (via src/build.js)', () => {
     expect(clientPy).toMatch(/self\.motor = SimpleNamespace\([\s\S]*?motor_echo=Channel\([\s\S]*?"motor\/echo"/);
   });
 
+  it('threads the MQTT retain binding into the Channel ctor (channel- and operation-level)', () => {
+    const clientPy = byPath['src/demo_bus/client.py'];
+    // motor_mode: channel-level bindings.mqtt.retain. motor_command: inherited from its send op.
+    expect(clientPy).toContain('"motor/mode", control_pb2.MotorModeCmd, self._transport, self._dispatch, True');
+    expect(clientPy).toContain('"motor/command", control_pb2.MotorCommand, self._transport, self._dispatch, True');
+    // Untagged, unbound channel: unchanged, no retain arg.
+    expect(clientPy).toContain('"device/reset", commands_pb2.ResetCommand, self._transport, self._dispatch\n');
+    // motor_echo shares the "motor" group but declares no retain of its own.
+    expect(clientPy).not.toMatch(/"motor\/echo"[^\n]*self\._dispatch, True/);
+    expect(clientPy).toContain('def publish(self, topic: str, payload: bytes, retain: bool = False) -> None:');
+    expect(clientPy).toContain('self._client.publish(topic, payload, retain=retain)');
+  });
+
+  it('records and asserts the retain flag in the generated FakeMqttTransport tests', () => {
+    const testPy = byPath['tests/test_client.py'];
+    expect(testPy).toContain('self.published: list[tuple[str, bytes, bool]] = []');
+    expect(testPy).toContain('def publish(self, topic: str, payload: bytes, retain: bool = False) -> None:');
+    expect(testPy).toContain('self.published.append((topic, payload, retain))');
+    expect(testPy).toMatch(/def test_motor__motor_mode_publish[\s\S]*?assert retain is True/);
+    expect(testPy).toMatch(/def test_reset_command_publish[\s\S]*?assert retain is False/);
+  });
+
   it('__init__.py re-exports MessageBus and MqttConfig', () => {
     expect(byPath['src/demo_bus/__init__.py']).toContain('from demo_bus.client import MessageBus, MqttConfig');
   });

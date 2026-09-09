@@ -136,6 +136,8 @@ message_bus.${exampleAttr}.address  # "${exampleAddress}"
 \`\`\`
 
 \`publish\`/\`subscribe\` always use protobuf binary encoding (\`SerializeToString\`/\`ParseFromString\`).
+Channels whose AsyncAPI MQTT binding (or their \`send\` operation's binding) sets \`retain: true\`
+publish with the MQTT retain flag set; all others publish normally.
 
 ## Project layout
 

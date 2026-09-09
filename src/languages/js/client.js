@@ -34,9 +34,13 @@ function buildClientFiles(model, ctx) {
   const { flat, groups } = groupChannels(channels);
 
   // `messageBus.<channel>` for a Channel with no tags; `new Channel(...)` expression for a member
-  // of a tag group. `indent` is the leading whitespace for the `new Channel(` line.
-  const channelExpr = (c, indent) =>
-    `new Channel(\n${indent}  "${c.address}", ${c.typeRef}, this._transport, this._dispatch\n${indent})`;
+  // of a tag group. `indent` is the leading whitespace for the `new Channel(` line. The trailing
+  // `retain` arg is only emitted for channels whose MQTT binding sets it, so non-retained output
+  // is byte-for-byte unchanged.
+  const channelExpr = (c, indent) => {
+    const retainArg = c.retain ? ", true" : "";
+    return `new Channel(\n${indent}  "${c.address}", ${c.typeRef}, this._transport, this._dispatch${retainArg}\n${indent})`;
+  };
 
   const flatProps = flat
     .map((c) => {
@@ -92,7 +96,7 @@ import messages from "./generated/messages.js";
  *   the same five methods).
  * @property {() => void} connect
  * @property {() => void} disconnect
- * @property {(topic: string, payload: Uint8Array) => void} publish
+ * @property {(topic: string, payload: Uint8Array, retain?: boolean) => void} publish
  * @property {(topic: string) => void} subscribe
  * @property {(handler: (topic: string, payload: Uint8Array) => void) => void} setMessageHandler
  */
@@ -138,9 +142,10 @@ export class MqttJsTransport {
   /**
    * @param {string} topic
    * @param {Uint8Array} payload
+   * @param {boolean} [retain] set the MQTT retain flag on this publish
    */
-  publish(topic, payload) {
-    this._client.publish(topic, payload);
+  publish(topic, payload, retain = false) {
+    this._client.publish(topic, payload, { retain });
   }
 
   /** @param {string} topic */
@@ -164,17 +169,19 @@ export class Channel {
    *   message class (e.g. messages.fleet.control.MotorCommand)
    * @param {MqttTransport} transport
    * @param {Map<string, (payload: Uint8Array) => void>} dispatch
+   * @param {boolean} [retain] publish with the MQTT retain flag set (from the channel's binding)
    */
-  constructor(address, messageType, transport, dispatch) {
+  constructor(address, messageType, transport, dispatch, retain = false) {
     this.address = address;
     this._messageType = messageType;
     this._transport = transport;
     this._dispatch = dispatch;
+    this._retain = retain;
   }
 
   /** @param {object} message a plain object matching the proto shape, or a message instance */
   publish(message) {
-    this._transport.publish(this.address, this._messageType.encode(message).finish());
+    this._transport.publish(this.address, this._messageType.encode(message).finish(), this._retain);
   }
 
   /** @param {(message: object) => void} handler */
