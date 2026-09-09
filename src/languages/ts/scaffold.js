@@ -180,7 +180,9 @@ messageBus.${exampleId}.address; // "${exampleAddress}"
 \`\`\`
 
 \`publish\`/\`subscribe\` always use protobuf binary encoding (\`Type.encode(...).finish()\` /
-\`Type.decode(...)\`, the [ts-proto](https://github.com/stephenh/ts-proto) codec API).
+\`Type.decode(...)\`, the [ts-proto](https://github.com/stephenh/ts-proto) codec API). Channels
+whose AsyncAPI MQTT binding (or their \`send\` operation's binding) sets \`retain: true\` publish
+with the MQTT retain flag set; all others publish normally.
 
 **Browsers cannot open raw TCP MQTT sockets** — only MQTT-over-WebSocket. The broker this client
 connects to needs a websocket listener (e.g. Mosquitto's \`protocol websockets\`, commonly on port

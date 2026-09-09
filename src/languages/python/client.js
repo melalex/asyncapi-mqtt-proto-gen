@@ -52,8 +52,12 @@ function buildClientFiles(model, ctx) {
 
   // A tagged channel is reached as message_bus.<tag>.<channel>; the group is a SimpleNamespace
   // holding one Channel per member. `indent` is the leading whitespace of the `Channel(` line.
-  const channelExpr = (c, indent) =>
-    `Channel(\n${indent}    "${c.address}", ${c.typeRef}, self._transport, self._dispatch\n${indent})`;
+  // The trailing `retain` arg is only emitted for channels whose MQTT binding sets it, so
+  // non-retained output is byte-for-byte unchanged.
+  const channelExpr = (c, indent) => {
+    const retainArg = c.retain ? ', True' : '';
+    return `Channel(\n${indent}    "${c.address}", ${c.typeRef}, self._transport, self._dispatch${retainArg}\n${indent})`;
+  };
 
   const flatAttrs = flat
     .map((c) => {
@@ -115,7 +119,7 @@ class MqttTransport(Protocol):
 
     def disconnect(self) -> None: ...
 
-    def publish(self, topic: str, payload: bytes) -> None: ...
+    def publish(self, topic: str, payload: bytes, retain: bool = False) -> None: ...
 
     def subscribe(self, topic: str) -> None: ...
 
@@ -151,8 +155,8 @@ class PahoMqttTransport:
         self._client.disconnect()
         self._client.loop_stop()
 
-    def publish(self, topic: str, payload: bytes) -> None:
-        self._client.publish(topic, payload)
+    def publish(self, topic: str, payload: bytes, retain: bool = False) -> None:
+        self._client.publish(topic, payload, retain=retain)
 
     def subscribe(self, topic: str) -> None:
         self._client.subscribe(topic)
@@ -174,14 +178,16 @@ class Channel(Generic[TMessage]):
         message_cls: type[TMessage],
         transport: MqttTransport,
         dispatch: dict[str, Callable[[bytes], None]],
+        retain: bool = False,
     ) -> None:
         self.address = address
         self._message_cls = message_cls
         self._transport = transport
         self._dispatch = dispatch
+        self._retain = retain
 
     def publish(self, message: TMessage) -> None:
-        self._transport.publish(self.address, message.SerializeToString())
+        self._transport.publish(self.address, message.SerializeToString(), self._retain)
 
     def subscribe(self, handler: Callable[[TMessage], None]) -> None:
         self._transport.subscribe(self.address)

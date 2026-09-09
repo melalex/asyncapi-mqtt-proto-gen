@@ -38,6 +38,10 @@ channels:
     address: 'motor/mode'
     tags:
       - name: motor
+    # Channel-level MQTT binding: publishes on this channel set the retain flag
+    bindings:
+      mqtt:
+        retain: true
     messages:
       MotorModeCmd:
         $ref: '#/components/messages/MotorModeCmd'
@@ -72,6 +76,10 @@ operations:
     action: send
     channel:
       $ref: '#/channels/motorCommand'
+    # Operation-level MQTT retain: motorCommand has no channel binding, so it inherits this
+    bindings:
+      mqtt:
+        retain: true
     messages:
       - $ref: '#/channels/motorCommand/messages/MotorCommand'
 

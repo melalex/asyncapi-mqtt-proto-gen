@@ -42,10 +42,14 @@ function buildMessageBusFiles(model, ctx) {
   // inside one nested struct per tag (`messageBus.<tag>.<channel>`); the struct needs an explicit
   // constructor because a nested class's default member initializers can't name the enclosing
   // MessageBus's `transport_` / `dispatch_`.
+  // The trailing `, true` retain arg is only emitted for channels whose MQTT binding sets it, so
+  // non-retained output stays byte-for-byte unchanged.
+  const retainArg = (c) => (c.retain ? ', true' : '');
+
   const flatMembers = flat
     .map((c) => {
       const doc = c.description ? `  // ${c.description.trim().split('\n')[0]}\n` : '';
-      return `${doc}  Channel<${typeOf(c)}> ${c.id}{"${c.address}", *transport_, dispatch_};`;
+      return `${doc}  Channel<${typeOf(c)}> ${c.id}{"${c.address}", *transport_, dispatch_${retainArg(c)}};`;
     })
     .join('\n');
 
@@ -53,7 +57,7 @@ function buildMessageBusFiles(model, ctx) {
     .map((g) => {
       const structName = `${toPascalCase(g.name)}Group`;
       const ctorInits = g.channels
-        .map((c) => `${c.id}("${c.address}", transport, dispatch)`)
+        .map((c) => `${c.id}("${c.address}", transport, dispatch${retainArg(c)})`)
         .join(',\n          ');
       const fields = g.channels
         .map((c) => {
@@ -109,7 +113,8 @@ class IMqttTransport {
 
   virtual void connect() = 0;
   virtual void disconnect() = 0;
-  virtual void publish(const std::string& topic, const std::string& payload) = 0;
+  // \`retain\` sets the MQTT retain flag; defaulted so callers that don't care are unaffected.
+  virtual void publish(const std::string& topic, const std::string& payload, bool retain = false) = 0;
   virtual void subscribe(const std::string& topic) = 0;
 
   // Installs the single handler invoked for every incoming message, on every subscribed topic.
@@ -154,7 +159,7 @@ class MosquittoTransport : public IMqttTransport {
 
   void connect() override;
   void disconnect() override;
-  void publish(const std::string& topic, const std::string& payload) override;
+  void publish(const std::string& topic, const std::string& payload, bool retain) override;
   void subscribe(const std::string& topic) override;
   void setMessageHandler(MessageHandler handler) override;
 
@@ -206,15 +211,19 @@ template <typename TMessage>
 class Channel {
  public:
   Channel(std::string channelAddress, IMqttTransport& transport,
-          std::unordered_map<std::string, std::function<void(const std::string&)>>& dispatch)
-      : address(std::move(channelAddress)), transport_(transport), dispatch_(dispatch) {}
+          std::unordered_map<std::string, std::function<void(const std::string&)>>& dispatch,
+          bool retain = false)
+      : address(std::move(channelAddress)),
+        transport_(transport),
+        dispatch_(dispatch),
+        retain_(retain) {}
 
   void publish(const TMessage& message) const {
     std::string payload;
     if (!message.SerializeToString(&payload)) {
       return;
     }
-    transport_.publish(address, payload);
+    transport_.publish(address, payload, retain_);
   }
 
   void subscribe(std::function<void(const TMessage&)> handler) {
@@ -232,6 +241,7 @@ class Channel {
  private:
   IMqttTransport& transport_;
   std::unordered_map<std::string, std::function<void(const std::string&)>>& dispatch_;
+  bool retain_ = false;
 };
 
 // Owns the MQTT connection and exposes one Channel<T> member per spec channel.
@@ -326,9 +336,9 @@ void MosquittoTransport::disconnect() {
   }
 }
 
-void MosquittoTransport::publish(const std::string& topic, const std::string& payload) {
+void MosquittoTransport::publish(const std::string& topic, const std::string& payload, bool retain) {
   mosquitto_publish(client_.get(), /*mid=*/nullptr, topic.c_str(), static_cast<int>(payload.size()),
-                     payload.data(), /*qos=*/0, /*retain=*/false);
+                     payload.data(), /*qos=*/0, retain);
 }
 
 void MosquittoTransport::subscribe(const std::string& topic) {

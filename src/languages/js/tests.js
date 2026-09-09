@@ -27,7 +27,7 @@ import messages from "../src/generated/messages.js";
 /** In-memory MqttTransport used by tests. */
 class FakeMqttTransport {
   constructor() {
-    /** @type {Array<{ topic: string, payload: Uint8Array }>} */
+    /** @type {Array<{ topic: string, payload: Uint8Array, retain: boolean }>} */
     this.published = [];
     /** @type {string[]} */
     this.subscribedTopics = [];
@@ -43,8 +43,8 @@ class FakeMqttTransport {
     this.connected = false;
   }
 
-  publish(topic, payload) {
-    this.published.push({ topic, payload });
+  publish(topic, payload, retain = false) {
+    this.published.push({ topic, payload, retain });
   }
 
   subscribe(topic) {
@@ -67,7 +67,7 @@ ${testCases}`;
 }
 
 function testCasesFor(channel, groupName) {
-  const { id, typeRef, address } = channel;
+  const { id, typeRef, address, retain } = channel;
   const accessor = groupName ? `bus.${groupName}.${id}` : `bus.${id}`;
   const label = groupName ? `${groupName}.${id}` : id;
 
@@ -87,6 +87,7 @@ function testCasesFor(channel, groupName) {
 
     expect(transport.published).toHaveLength(1);
     expect(transport.published[0].topic).toBe("${address}");
+    expect(transport.published[0].retain).toBe(${retain ? 'true' : 'false'});
     expect(() => ${typeRef}.decode(transport.published[0].payload)).not.toThrow();
   });
 

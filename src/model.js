@@ -11,7 +11,8 @@ const { extractProtoDeclarations } = require('./proto-extract');
  * @param {import('@asyncapi/parser').AsyncAPIDocument} asyncapiDoc parsed AsyncAPI document
  * @returns {{
  *   channels: Array<{ id: string, address: string, description: string|undefined,
- *                      tags: string[], protoPackage: string, protoMessageType: string }>,
+ *                      tags: string[], retain: boolean, protoPackage: string,
+ *                      protoMessageType: string }>,
  *   protoPackages: Map<string, Map<string, { kind: string, name: string, text: string }>>
  * }}
  */
@@ -19,6 +20,22 @@ function parseAsyncApiDocument(asyncapiDoc) {
   const channels = asyncapiDoc.channels().all();
   const channelModels = [];
   const protoPackages = new Map();
+
+  // MQTT `retain` is declared per channel via `channels.<id>.bindings.mqtt.retain`. The AsyncAPI
+  // MQTT binding spec actually defines `retain` on the *operation* binding, so fall back to that:
+  // an explicit channel-level value (true or false) always wins; only a channel with no `retain`
+  // key inherits it from a `send` operation that targets it. Bindings are untouched by any schema
+  // parser, so `.bindings().get('mqtt')` reads the same under the CLI and a bare `new Parser()`.
+  const operationRetainChannelIds = new Set();
+  for (const operation of asyncapiDoc.operations ? asyncapiDoc.operations().all() : []) {
+    if (operation.action && operation.action() !== 'send') continue;
+    const opMqtt = operation.bindings ? operation.bindings().get('mqtt') : undefined;
+    if (opMqtt && opMqtt.json('retain') === true) {
+      for (const ch of operation.channels().all()) {
+        operationRetainChannelIds.add(ch.id());
+      }
+    }
+  }
 
   for (const channel of channels) {
     const channelId = channel.id();
@@ -95,6 +112,12 @@ function parseAsyncApiDocument(asyncapiDoc) {
     const matching = messageDecls.find((d) => d.name === messageId);
     const protoMessageType = (matching || messageDecls[messageDecls.length - 1]).name;
 
+    const channelMqtt = channel.bindings ? channel.bindings().get('mqtt') : undefined;
+    const channelRetain = channelMqtt ? channelMqtt.json('retain') : undefined;
+    const retain =
+      channelRetain === true ||
+      (channelRetain === undefined && operationRetainChannelIds.has(channelId));
+
     channelModels.push({
       id: channelId,
       address: channel.address(),
@@ -102,6 +125,8 @@ function parseAsyncApiDocument(asyncapiDoc) {
       // AsyncAPI v3 tags on the channel; drive the grouped client API (messageBus.<tag>.<channel>).
       // Always a (possibly empty) array — channel.tags() returns an empty collection when absent.
       tags: channel.tags ? channel.tags().all().map((t) => t.name()) : [],
+      // MQTT retain flag for publishes on this channel (see the operation fallback above).
+      retain,
       protoPackage,
       protoMessageType,
     });

@@ -43,7 +43,7 @@ class FakeMqttTransport:
     via set_message_handler()."""
 
     def __init__(self) -> None:
-        self.published: list[tuple[str, bytes]] = []
+        self.published: list[tuple[str, bytes, bool]] = []
         self.subscribed_topics: list[str] = []
         self.connected = False
         self._handler: Optional[Callable[[str, bytes], None]] = None
@@ -54,8 +54,8 @@ class FakeMqttTransport:
     def disconnect(self) -> None:
         self.connected = False
 
-    def publish(self, topic: str, payload: bytes) -> None:
-        self.published.append((topic, payload))
+    def publish(self, topic: str, payload: bytes, retain: bool = False) -> None:
+        self.published.append((topic, payload, retain))
 
     def subscribe(self, topic: str) -> None:
         self.subscribed_topics.append(topic)
@@ -75,7 +75,7 @@ ${testFunctions}`;
 }
 
 function testFunctionsFor(channel, groupName) {
-  const { attrName, typeRef, address } = channel;
+  const { attrName, typeRef, address, retain } = channel;
   const accessor = groupName ? `bus.${groupName}.${attrName}` : `bus.${attrName}`;
   const fn = groupName ? `${groupName}__${attrName}` : attrName;
 
@@ -94,8 +94,9 @@ def test_${fn}_publish_sends_a_protobuf_encoded_message() -> None:
     ${accessor}.publish(message)
 
     assert len(transport.published) == 1
-    topic, payload = transport.published[0]
+    topic, payload, retain = transport.published[0]
     assert topic == "${address}"
+    assert retain is ${retain ? 'True' : 'False'}
 
     round_tripped = ${typeRef}()
     round_tripped.ParseFromString(payload)  # doesn't raise

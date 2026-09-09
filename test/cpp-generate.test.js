@@ -82,7 +82,7 @@ describe('cpp buildProject (via src/build.js)', () => {
     expect(hpp).toContain('Channel<fleet::control::MotorCommand> motorCommand;');
     expect(hpp).toContain('Channel<fleet::control::MotorModeCmd> motorMode;');
     expect(hpp).toContain('} motor{*transport_, dispatch_};');
-    expect(hpp).toContain('motorCommand("motor/command", transport, dispatch)');
+    expect(hpp).toContain('motorCommand("motor/command", transport, dispatch, true)');
     // tag "Device Telemetry" -> slugified
     expect(hpp).toContain('struct DeviceTelemetryGroup {');
     expect(hpp).toContain('} device_telemetry{*transport_, dispatch_};');
@@ -112,6 +112,30 @@ describe('cpp buildProject (via src/build.js)', () => {
       expect(cpp).toContain(`${accessor}.publish(message)`);
       expect(cpp).toContain(`${accessor}.subscribe(`);
     }
+  });
+
+  it('threads the MQTT retain binding into the Channel<T> ctor (channel- and operation-level)', () => {
+    const hpp = byPath['include/demo_bus/message_bus.hpp'];
+    // motorMode carries a channel-level bindings.mqtt.retain; motorCommand inherits it from its
+    // send operation. Both are grouped under "motor".
+    expect(hpp).toContain('motorMode("motor/mode", transport, dispatch, true)');
+    expect(hpp).toContain('motorCommand("motor/command", transport, dispatch, true)');
+    // An untagged, unbound channel is unchanged: no retain arg.
+    expect(hpp).toContain('Channel<fleet::commands::ResetCommand> resetCommand{"device/reset", *transport_, dispatch_};');
+    // motorEcho has no retain of its own even though it shares the "motor" group.
+    expect(hpp).toContain('motorEcho("motor/echo", transport, dispatch)');
+    expect(hpp).not.toContain('motorEcho("motor/echo", transport, dispatch, true)');
+  });
+
+  it('records and asserts the retain flag in the generated FakeMqttTransport tests', () => {
+    const hpp = byPath['tests/fake_mqtt_transport.hpp'];
+    expect(hpp).toContain('bool retain;');
+    expect(hpp).toContain('void publish(const std::string& topic, const std::string& payload, bool retain) override');
+    expect(hpp).toContain('published.push_back({topic, payload, retain});');
+
+    const cpp = byPath['tests/test_messages.cpp'];
+    expect(cpp).toMatch(/bus\.motor\.motorMode\.publish[\s\S]*?published\[0\]\.retain == true/);
+    expect(cpp).toMatch(/bus\.resetCommand\.publish[\s\S]*?published\[0\]\.retain == false/);
   });
 
   it('rejects a tag whose slug collides with an untagged channel accessor', async () => {

@@ -89,6 +89,21 @@ describe('parseAsyncApiDocument', () => {
     expect(byId.resetCommand.tags).toEqual([]);
   });
 
+  it('resolves the MQTT retain flag: channel binding first, then a send operation binding', async () => {
+    const doc = await parseFixture('fleet-sample.yaml');
+    const byId = Object.fromEntries(parseAsyncApiDocument(doc).channels.map((c) => [c.id, c]));
+
+    // motorMode declares bindings.mqtt.retain on the channel itself.
+    expect(byId.motorMode.retain).toBe(true);
+    // motorCommand has no channel binding; it inherits retain from its `send` operation
+    // (sendMotorCommand) and NOT from the sibling `receive` operation.
+    expect(byId.motorCommand.retain).toBe(true);
+    // Channels with neither a channel nor an operation binding default to false.
+    expect(byId.motorEcho.retain).toBe(false);
+    expect(byId.resetCommand.retain).toBe(false);
+    expect(byId.deviceHeartbeat.retain).toBe(false);
+  });
+
   it('rejects channels with more than one message', async () => {
     const parser = new Parser();
     const { document } = await parser.parse(`

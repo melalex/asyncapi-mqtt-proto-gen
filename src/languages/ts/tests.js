@@ -26,7 +26,7 @@ import * as messages from "../src/messages.js";
 
 /** In-memory MqttTransport used by tests. */
 class FakeMqttTransport implements MqttTransport {
-  readonly published: Array<{ topic: string; payload: Uint8Array }> = [];
+  readonly published: Array<{ topic: string; payload: Uint8Array; retain: boolean }> = [];
   readonly subscribedTopics: string[] = [];
   connected = false;
   private handler: ((topic: string, payload: Uint8Array) => void) | null = null;
@@ -39,8 +39,8 @@ class FakeMqttTransport implements MqttTransport {
     this.connected = false;
   }
 
-  publish(topic: string, payload: Uint8Array): void {
-    this.published.push({ topic, payload });
+  publish(topic: string, payload: Uint8Array, retain = false): void {
+    this.published.push({ topic, payload, retain });
   }
 
   subscribe(topic: string): void {
@@ -63,7 +63,7 @@ ${testCases}`;
 }
 
 function testCasesFor(channel, groupName) {
-  const { id, valueRef, address } = channel;
+  const { id, valueRef, address, retain } = channel;
   const accessor = groupName ? `bus.${groupName}.${id}` : `bus.${id}`;
   const label = groupName ? `${groupName}.${id}` : id;
 
@@ -83,6 +83,7 @@ function testCasesFor(channel, groupName) {
 
     expect(transport.published).toHaveLength(1);
     expect(transport.published[0].topic).toBe("${address}");
+    expect(transport.published[0].retain).toBe(${retain ? 'true' : 'false'});
     expect(() => ${valueRef}.decode(transport.published[0].payload)).not.toThrow();
   });
 
