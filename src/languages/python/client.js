@@ -101,6 +101,7 @@ publish()/subscribe() always use protobuf binary encoding (SerializeToString/Par
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Callable, Generic, Optional, Protocol, TypeVar${simpleNamespaceImport}
 
@@ -135,6 +136,12 @@ class MqttConfig:
     client_id: str = "${projectName}"
     keepalive_seconds: int = 60
 
+    # Optional MQTT Last-Will. When will_topic is set the broker publishes
+    # will_payload to it if this client disconnects ungracefully.
+    will_topic: str = ""
+    will_payload: bytes = b""
+    will_retain: bool = False
+
 
 class PahoMqttTransport:
     """MqttTransport implementation backed by paho-mqtt. Connects asynchronously and runs
@@ -145,7 +152,17 @@ class PahoMqttTransport:
         self._config = config
         self._client = mqtt.Client(client_id=config.client_id)
         self._handler: Optional[Callable[[str, bytes], None]] = None
+        # paho-mqtt silently drops a subscribe() issued before CONNACK and never
+        # replays subscriptions after a reconnect. Record every topic and
+        # (re)issue them from on_connect.
+        self._subscriptions: set[str] = set()
+        self._sub_lock = threading.Lock()
         self._client.on_message = self._on_message
+        self._client.on_connect = self._on_connect
+        if config.will_topic:
+            self._client.will_set(
+                config.will_topic, config.will_payload, qos=0, retain=config.will_retain
+            )
 
     def connect(self) -> None:
         self._client.connect_async(self._config.host, self._config.port, self._config.keepalive_seconds)
@@ -159,10 +176,22 @@ class PahoMqttTransport:
         self._client.publish(topic, payload, retain=retain)
 
     def subscribe(self, topic: str) -> None:
+        with self._sub_lock:
+            self._subscriptions.add(topic)
+        # Harmless (MQTT_ERR_NO_CONN) if the socket isn't up yet; _on_connect
+        # replays it (and every reconnect).
         self._client.subscribe(topic)
 
     def set_message_handler(self, handler: Callable[[str, bytes], None]) -> None:
         self._handler = handler
+
+    def _on_connect(self, *_args: object) -> None:
+        # Signature covers paho CallbackAPIVersion v1 (client, userdata, flags, rc)
+        # and v2. A failed connect just makes the re-subscribes harmless no-ops.
+        with self._sub_lock:
+            topics = list(self._subscriptions)
+        for topic in topics:
+            self._client.subscribe(topic)
 
     def _on_message(self, _client: mqtt.Client, _userdata: object, message: mqtt.MQTTMessage) -> None:
         if self._handler is not None:

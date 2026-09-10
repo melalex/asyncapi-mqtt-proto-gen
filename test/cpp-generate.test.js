@@ -178,6 +178,31 @@ components:
     );
   });
 
+  it('tracks subscriptions and replays them from onConnect (libmosquitto drops pre-CONNACK subscribes)', () => {
+    const hpp = byPath['include/demo_bus/mosquitto_transport.hpp'];
+    expect(hpp).toContain('#include <mutex>');
+    expect(hpp).toContain('#include <set>');
+    expect(hpp).toContain('std::set<std::string> subscriptions_;');
+    expect(hpp).toContain('std::mutex subscriptionsMutex_;');
+
+    const cpp = byPath['src/mosquitto_transport.cpp'];
+    // onConnect is no longer an empty body; it re-issues every recorded topic.
+    expect(cpp).not.toContain('void MosquittoTransport::onConnect(mosquitto* /*client*/, void* /*userData*/, int /*rc*/) {}');
+    expect(cpp).toMatch(/void MosquittoTransport::onConnect\(mosquitto\* client, void\* userData, int rc\) \{[\s\S]*?self->subscriptions_[\s\S]*?mosquitto_subscribe\(client,/);
+    // subscribe() records the topic under the lock and still issues it immediately.
+    expect(cpp).toMatch(/void MosquittoTransport::subscribe\(const std::string& topic\) \{[\s\S]*?subscriptions_\.insert\(topic\)[\s\S]*?mosquitto_subscribe\(client_\.get\(\)/);
+  });
+
+  it('exposes MQTT Last-Will fields on MqttConfig and calls mosquitto_will_set in connect()', () => {
+    const hpp = byPath['include/demo_bus/mosquitto_transport.hpp'];
+    expect(hpp).toContain('std::string willTopic;');
+    expect(hpp).toContain('std::string willPayload;');
+    expect(hpp).toContain('bool willRetain = false;');
+
+    const cpp = byPath['src/mosquitto_transport.cpp'];
+    expect(cpp).toMatch(/void MosquittoTransport::connect\(\) \{[\s\S]*?if \(!config_\.willTopic\.empty\(\)\) \{[\s\S]*?mosquitto_will_set\(client_\.get\(\)[\s\S]*?mosquitto_connect_async/);
+  });
+
   it('names the CMake project after projectName and wires up protobuf + mosquitto', () => {
     const cmake = byPath['CMakeLists.txt'];
     expect(cmake).toContain('project(demo_bus CXX)');

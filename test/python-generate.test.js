@@ -112,6 +112,26 @@ describe('python buildProject (via src/build.js)', () => {
     expect(byPath['src/demo_bus/__init__.py']).toContain('from demo_bus.client import MessageBus, MqttConfig');
   });
 
+  it('tracks subscriptions and replays them from on_connect (paho drops pre-CONNACK subscribes)', () => {
+    const clientPy = byPath['src/demo_bus/client.py'];
+    expect(clientPy).toContain('import threading');
+    expect(clientPy).toContain('self._subscriptions: set[str] = set()');
+    expect(clientPy).toContain('self._sub_lock = threading.Lock()');
+    expect(clientPy).toContain('self._client.on_connect = self._on_connect');
+    // subscribe() records the topic under the lock and still issues it immediately.
+    expect(clientPy).toMatch(/def subscribe\(self, topic: str\) -> None:[\s\S]*?self\._subscriptions\.add\(topic\)[\s\S]*?self\._client\.subscribe\(topic\)/);
+    // _on_connect re-issues every recorded topic.
+    expect(clientPy).toMatch(/def _on_connect\(self, \*_args: object\) -> None:[\s\S]*?self\._client\.subscribe\(topic\)/);
+  });
+
+  it('exposes MQTT Last-Will fields on MqttConfig and wires them into the paho client', () => {
+    const clientPy = byPath['src/demo_bus/client.py'];
+    expect(clientPy).toContain('will_topic: str = ""');
+    expect(clientPy).toContain('will_payload: bytes = b""');
+    expect(clientPy).toContain('will_retain: bool = False');
+    expect(clientPy).toMatch(/if config\.will_topic:[\s\S]*?self\._client\.will_set\(\s*config\.will_topic, config\.will_payload, qos=0, retain=config\.will_retain/);
+  });
+
   it('generates a publish/subscribe/address pytest function per channel, through its accessor path', () => {
     const testPy = byPath['tests/test_client.py'];
     const cases = [

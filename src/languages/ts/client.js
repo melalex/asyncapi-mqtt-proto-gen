@@ -106,7 +106,7 @@ function buildClientFiles(model, ctx) {
  * Type.decode(...) — the ts-proto codec API, see src/generated/).
  */
 
-import mqtt, { type MqttClient } from "mqtt";
+import mqtt, { type IClientOptions, type MqttClient } from "mqtt";
 
 import * as messages from "./messages.js";
 
@@ -126,6 +126,11 @@ export interface MqttConfig {
    */
   url?: string;
   clientId?: string;
+  /**
+   * Optional MQTT Last-Will: the broker publishes \`payload\` to \`topic\` if this client
+   * disconnects ungracefully.
+   */
+  will?: { topic: string; payload: Uint8Array; retain?: boolean };
 }
 
 /** The subset of a ts-proto generated message object that Channel needs. */
@@ -135,7 +140,10 @@ export interface ProtoCodec<T> {
   create(base?: unknown): T;
 }
 
-const DEFAULT_CONFIG: Required<MqttConfig> = {
+/** \`will\` stays optional — a Last-Will is opt-in and has no sensible default. */
+type ResolvedMqttConfig = Required<Omit<MqttConfig, "will">> & Pick<MqttConfig, "will">;
+
+const DEFAULT_CONFIG: ResolvedMqttConfig = {
   url: "ws://localhost:9001",
   clientId: "${projectName}",
 };
@@ -145,16 +153,32 @@ const DEFAULT_CONFIG: Required<MqttConfig> = {
  * incoming messages are dispatched from MQTT.js's own 'message' event.
  */
 export class MqttJsTransport implements MqttTransport {
-  private readonly config: Required<MqttConfig>;
+  private readonly config: ResolvedMqttConfig;
   private client: MqttClient | null = null;
   private handler: ((topic: string, payload: Uint8Array) => void) | null = null;
+  // MQTT.js queues pre-connect subscriptions and re-subscribes on reconnect
+  // itself, but we still track them so subscribe() can be called before
+  // connect() without dereferencing a null client, and to be explicit.
+  private readonly subscriptions = new Set<string>();
 
   constructor(config?: MqttConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
   connect(): void {
-    this.client = mqtt.connect(this.config.url, { clientId: this.config.clientId });
+    const options: IClientOptions = { clientId: this.config.clientId };
+    if (this.config.will && this.config.will.topic) {
+      options.will = {
+        topic: this.config.will.topic,
+        payload: Buffer.from(this.config.will.payload),
+        retain: !!this.config.will.retain,
+        qos: 0,
+      };
+    }
+    this.client = mqtt.connect(this.config.url, options);
+    this.client.on("connect", () => {
+      for (const topic of this.subscriptions) this.client?.subscribe(topic);
+    });
     this.client.on("message", (topic, payload) => {
       if (this.handler) this.handler(topic, payload);
     });
@@ -169,6 +193,7 @@ export class MqttJsTransport implements MqttTransport {
   }
 
   subscribe(topic: string): void {
+    this.subscriptions.add(topic);
     this.client?.subscribe(topic);
   }
 

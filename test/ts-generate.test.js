@@ -114,6 +114,21 @@ describe('ts buildProject (via src/build.js)', () => {
     expect(testTs).toMatch(/describe\("resetCommand"[\s\S]*?published\[0\]\.retain\)\.toBe\(false\)/);
   });
 
+  it('tracks subscriptions and re-subscribes on connect', () => {
+    const clientTs = byPath['src/client.ts'];
+    expect(clientTs).toContain('private readonly subscriptions = new Set<string>();');
+    expect(clientTs).toMatch(/this\.client\.on\("connect", \(\) => \{[\s\S]*?this\.client\?\.subscribe\(topic\)/);
+    expect(clientTs).toMatch(/subscribe\(topic: string\): void \{[\s\S]*?this\.subscriptions\.add\(topic\);[\s\S]*?this\.client\?\.subscribe\(topic\);/);
+  });
+
+  it('supports an MQTT Last-Will in MqttConfig and passes it to mqtt.connect()', () => {
+    const clientTs = byPath['src/client.ts'];
+    expect(clientTs).toContain('will?: { topic: string; payload: Uint8Array; retain?: boolean };');
+    expect(clientTs).toContain('Required<Omit<MqttConfig, "will">> & Pick<MqttConfig, "will">');
+    expect(clientTs).toMatch(/if \(this\.config\.will && this\.config\.will\.topic\) \{[\s\S]*?options\.will = \{[\s\S]*?topic: this\.config\.will\.topic/);
+    expect(clientTs).toContain('this.client = mqtt.connect(this.config.url, options);');
+  });
+
   it('re-exports each generated proto module as a namespace in src/messages.ts', () => {
     const messagesTs = byPath['src/messages.ts'];
     expect(messagesTs).toContain('export * as control from "./generated/control.js";');
