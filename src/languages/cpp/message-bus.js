@@ -130,6 +130,8 @@ function mosquittoTransportHpp(projectName) {
   return `#pragma once
 
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 
 #include "${projectName}/mqtt_transport.hpp"
@@ -144,6 +146,12 @@ struct MqttConfig {
   int port = 1883;
   std::string clientId = "${projectName}";
   int keepAliveSeconds = 60;
+
+  // Optional MQTT Last-Will. When willTopic is non-empty the broker publishes
+  // willPayload to it if this client disconnects ungracefully.
+  std::string willTopic;
+  std::string willPayload;
+  bool willRetain = false;
 };
 
 // IMqttTransport implementation backed by Eclipse libmosquitto. Connects asynchronously and
@@ -175,6 +183,12 @@ class MosquittoTransport : public IMqttTransport {
   MqttConfig config_;
   std::unique_ptr<mosquitto, MosquittoDeleter> client_;
   MessageHandler handler_;
+
+  // Every topic ever passed to subscribe(). libmosquitto silently drops a
+  // subscribe issued before CONNACK and never replays subscriptions after a
+  // reconnect, so onConnect re-issues all of these on every (re)connect.
+  std::set<std::string> subscriptions_;
+  std::mutex subscriptionsMutex_;
 };
 
 }  // namespace ${projectName}
@@ -284,6 +298,7 @@ function mosquittoTransportCpp(projectName) {
 
 #include <mosquitto.h>
 
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 
@@ -325,6 +340,11 @@ MosquittoTransport::MosquittoTransport(MqttConfig config) : config_(std::move(co
 MosquittoTransport::~MosquittoTransport() { disconnect(); }
 
 void MosquittoTransport::connect() {
+  if (!config_.willTopic.empty()) {
+    mosquitto_will_set(client_.get(), config_.willTopic.c_str(),
+                       static_cast<int>(config_.willPayload.size()), config_.willPayload.data(),
+                       /*qos=*/0, config_.willRetain);
+  }
   mosquitto_connect_async(client_.get(), config_.host.c_str(), config_.port, config_.keepAliveSeconds);
   mosquitto_loop_start(client_.get());
 }
@@ -342,12 +362,27 @@ void MosquittoTransport::publish(const std::string& topic, const std::string& pa
 }
 
 void MosquittoTransport::subscribe(const std::string& topic) {
+  {
+    std::lock_guard<std::mutex> lock(subscriptionsMutex_);
+    subscriptions_.insert(topic);
+  }
+  // Harmless MOSQ_ERR_NO_CONN if the socket isn't up yet; onConnect replays it
+  // (and every reconnect).
   mosquitto_subscribe(client_.get(), /*mid=*/nullptr, topic.c_str(), /*qos=*/0);
 }
 
 void MosquittoTransport::setMessageHandler(MessageHandler handler) { handler_ = std::move(handler); }
 
-void MosquittoTransport::onConnect(mosquitto* /*client*/, void* /*userData*/, int /*rc*/) {}
+void MosquittoTransport::onConnect(mosquitto* client, void* userData, int rc) {
+  auto* self = static_cast<MosquittoTransport*>(userData);
+  if (self == nullptr || rc != 0) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(self->subscriptionsMutex_);
+  for (const auto& topic : self->subscriptions_) {
+    mosquitto_subscribe(client, /*mid=*/nullptr, topic.c_str(), /*qos=*/0);
+  }
+}
 
 void MosquittoTransport::onDisconnect(mosquitto* /*client*/, void* /*userData*/, int /*rc*/) {}
 

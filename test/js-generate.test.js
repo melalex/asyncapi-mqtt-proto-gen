@@ -106,6 +106,20 @@ describe('js buildProject (via src/build.js)', () => {
     expect(testJs).toMatch(/describe\("resetCommand"[\s\S]*?published\[0\]\.retain\)\.toBe\(false\)/);
   });
 
+  it('tracks subscriptions, re-subscribes on connect, and guards subscribe() against a null client', () => {
+    const clientJs = byPath['src/client.js'];
+    expect(clientJs).toContain('this._subscriptions = new Set();');
+    expect(clientJs).toMatch(/this\._client\.on\("connect", \(\) => \{[\s\S]*?this\._client\.subscribe\(topic\)/);
+    expect(clientJs).toMatch(/subscribe\(topic\) \{[\s\S]*?this\._subscriptions\.add\(topic\);[\s\S]*?if \(this\._client\) this\._client\.subscribe\(topic\);/);
+  });
+
+  it('supports an MQTT Last-Will in MqttConfig and passes it to mqtt.connect()', () => {
+    const clientJs = byPath['src/client.js'];
+    expect(clientJs).toContain('@property {{ topic: string, payload: Uint8Array, retain?: boolean }} [will]');
+    expect(clientJs).toMatch(/if \(this\._config\.will && this\._config\.will\.topic\) \{[\s\S]*?options\.will = \{[\s\S]*?topic: this\._config\.will\.topic/);
+    expect(clientJs).toContain('this._client = mqtt.connect(this._config.url, options);');
+  });
+
   it('index.js re-exports MessageBus and the generated messages namespace', () => {
     const indexJs = byPath['src/index.js'];
     expect(indexJs).toContain('export { MessageBus, Channel, MqttJsTransport } from "./client.js"');

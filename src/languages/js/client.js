@@ -107,6 +107,8 @@ import messages from "./generated/messages.js";
  *   — this must point at a websocket listener (e.g. Mosquitto's \`protocol websockets\`), not the
  *   usual TCP 1883 port.
  * @property {string} [clientId]
+ * @property {{ topic: string, payload: Uint8Array, retain?: boolean }} [will] Optional MQTT
+ *   Last-Will: the broker publishes \`payload\` to \`topic\` if this client disconnects ungracefully.
  */
 
 /** @type {MqttConfig} */
@@ -126,10 +128,26 @@ export class MqttJsTransport {
     this._config = { ...DEFAULT_CONFIG, ...config };
     this._client = null;
     this._handler = null;
+    // MQTT.js queues pre-connect subscriptions and re-subscribes on reconnect
+    // itself, but we still track them so subscribe() can be called before
+    // connect() without dereferencing a null client, and to be explicit.
+    this._subscriptions = new Set();
   }
 
   connect() {
-    this._client = mqtt.connect(this._config.url, { clientId: this._config.clientId });
+    const options = { clientId: this._config.clientId };
+    if (this._config.will && this._config.will.topic) {
+      options.will = {
+        topic: this._config.will.topic,
+        payload: this._config.will.payload,
+        retain: !!this._config.will.retain,
+        qos: 0,
+      };
+    }
+    this._client = mqtt.connect(this._config.url, options);
+    this._client.on("connect", () => {
+      for (const topic of this._subscriptions) this._client.subscribe(topic);
+    });
     this._client.on("message", (topic, payload) => {
       if (this._handler) this._handler(topic, payload);
     });
@@ -150,7 +168,8 @@ export class MqttJsTransport {
 
   /** @param {string} topic */
   subscribe(topic) {
-    this._client.subscribe(topic);
+    this._subscriptions.add(topic);
+    if (this._client) this._client.subscribe(topic);
   }
 
   /** @param {(topic: string, payload: Uint8Array) => void} handler */
