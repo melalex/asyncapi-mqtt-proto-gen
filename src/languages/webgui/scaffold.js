@@ -59,6 +59,7 @@ function packageJson(distName, specTitle) {
     "typescript": "^5.4.0",
     "vite": "^5.2.0",
     "@vitejs/plugin-react": "^4.2.0",
+    "vite-plugin-singlefile": "^2.1.0",
     "vitest": "^1.5.0",
     "@testing-library/react": "^14.2.0",
     "@testing-library/jest-dom": "^6.4.0",
@@ -116,11 +117,23 @@ function tsconfigNodeJson() {
 function viteConfig() {
   return `import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
 
 // Bundler configuration (app mode, not library mode — unlike the js/ts backends, this project is
 // a runnable application, not an importable SDK): builds an index.html-rooted single-page app.
+//
+// vite-plugin-singlefile + base: "./" inline every JS/CSS chunk (incl. lazy MUI icon imports)
+// straight into dist/index.html and make its asset references relative, so the built file has
+// no external requests left to make. That's what lets it be opened by double-clicking it from a
+// file browser (file:// origin) instead of only through nginx/Docker — plain \`vite build\`'s
+// default \`<script type="module" src="/assets/...">\` output is blocked by Chrome's file://
+// CORS policy and only works at all by luck in some other browsers.
 export default defineConfig({
-  plugins: [react()],
+  base: "./",
+  plugins: [react(), viteSingleFile()],
+  build: {
+    cssCodeSplit: false,
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
@@ -237,6 +250,11 @@ npm run build       # proto codegen, tsc project build, then vite build
 npm run typecheck   # proto codegen, then tsc --noEmit
 npm test            # proto codegen, then vitest run
 \`\`\`
+
+\`npm run build\` produces a single self-contained \`dist/index.html\` (\`vite-plugin-singlefile\`
+inlines every JS/CSS chunk and uses relative asset paths) — no web server required, just
+double-click it open in a browser. Everything still needs a broker with an MQTT-over-WebSocket
+listener reachable from wherever the file is opened; see "Getting started" above.
 
 ## Docker
 
