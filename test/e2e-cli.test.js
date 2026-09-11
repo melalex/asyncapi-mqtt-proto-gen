@@ -150,6 +150,53 @@ describe('end-to-end: asyncapi generate fromTemplate', () => {
     });
   });
 
+  describe('-p lang=webgui', () => {
+    let outDir;
+
+    beforeAll(() => {
+      outDir = tmpOutDir('webgui');
+      generate('webgui', outDir);
+    });
+
+    it('writes the full project tree to disk, matching what buildFiles computed', () => {
+      // A representative sample across every category rather than the full ~68-file set (already
+      // exhaustively asserted in-memory by test/webgui-generate.test.js) — this test's job is just
+      // to prove the CLI actually wrote the tree to disk end to end.
+      const expected = [
+        '.gitignore',
+        'README.md',
+        'index.html',
+        'package.json',
+        'tsconfig.json',
+        'vite.config.ts',
+        'proto/commands.proto',
+        'proto/control.proto',
+        'proto/sensors.proto',
+        'proto/telemetry.proto',
+        'src/App.tsx',
+        'src/main.tsx',
+        'src/channels.ts',
+        'src/codec/root.ts',
+        'src/codec/fieldSchema.ts',
+        'src/mqtt/MqttJsTransport.ts',
+        'src/storage/db.ts',
+        'src/i18n/en.ts',
+        'src/i18n/uk.ts',
+        'src/state/ConnectionContext.tsx',
+        'src/components/layout/AppShell.tsx',
+        'src/components/tree/TopicTree.tsx',
+        'src/components/topic/ValueDiff.tsx',
+        'src/components/publish/PublishFormEditor.tsx',
+        'src/components/connections/ConnectionForm.tsx',
+        'tests/setup.ts',
+        'tests/codec.test.ts',
+      ];
+      for (const relPath of expected) {
+        expect(fs.existsSync(path.join(outDir, relPath))).toBe(true);
+      }
+    });
+  });
+
   it('rejects an unsupported lang with a clear CLI error', () => {
     expect(() => generate('rust', tmpOutDir('bad'))).toThrow();
   });

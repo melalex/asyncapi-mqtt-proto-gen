@@ -10,6 +10,7 @@ const LANGUAGES = {
   python: require('./languages/python'),
   js: require('./languages/js'),
   ts: require('./languages/ts'),
+  webgui: require('./languages/webgui'),
 };
 
 /**

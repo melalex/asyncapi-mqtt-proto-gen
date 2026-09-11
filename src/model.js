@@ -13,7 +13,8 @@ const { extractProtoDeclarations } = require('./proto-extract');
  *   channels: Array<{ id: string, address: string, description: string|undefined,
  *                      tags: string[], retain: boolean, protoPackage: string,
  *                      protoMessageType: string }>,
- *   protoPackages: Map<string, Map<string, { kind: string, name: string, text: string }>>
+ *   protoPackages: Map<string, Map<string, { kind: string, name: string, text: string }>>,
+ *   servers: Array<{ id: string, host: string, protocol: string, description: string|undefined }>
  * }}
  */
 function parseAsyncApiDocument(asyncapiDoc) {
@@ -132,7 +133,25 @@ function parseAsyncApiDocument(asyncapiDoc) {
     });
   }
 
-  return { channels: channelModels, protoPackages };
+  // Raw, faithful extraction of the spec's servers — {host}-style variables resolved to their
+  // declared default. No protocol-specific interpretation here (e.g. mapping to ws/wss, or
+  // splitting a "host:port" convention out of `host`): that's a consumer's decision, kept out of
+  // the shared IR since only the webgui backend currently uses this to seed its connections list.
+  const servers = (asyncapiDoc.servers ? asyncapiDoc.servers().all() : []).map((server) => {
+    const variables = server.variables ? server.variables().all() : [];
+    const varDefaults = new Map(
+      variables.map((v) => [v.id(), v.hasDefaultValue && v.hasDefaultValue() ? v.defaultValue() : ''])
+    );
+    const host = server.host().replace(/\{([^}]+)\}/g, (_, name) => varDefaults.get(name) ?? '');
+    return {
+      id: server.id(),
+      host,
+      protocol: server.protocol(),
+      description: server.description ? server.description() : undefined,
+    };
+  });
+
+  return { channels: channelModels, protoPackages, servers };
 }
 
 module.exports = { parseAsyncApiDocument };
